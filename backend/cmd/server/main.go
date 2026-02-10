@@ -53,6 +53,18 @@ func getDuration(key string, fallback time.Duration) time.Duration {
 	return d
 }
 
+func getBool(key string, fallback bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return fallback
+	}
+	return b
+}
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
@@ -67,6 +79,7 @@ func main() {
 	corsOrigin := getEnv("CORS_ALLOW_ORIGIN", "http://localhost:3000")
 	monitorInterval := getDuration("MONITOR_INTERVAL", 60*time.Second)
 	monitorBatchSize := getInt("MONITOR_BATCH_SIZE", 100)
+	monitorReprocessOnIdle := getBool("MONITOR_REPROCESS_ON_IDLE", false)
 
 	// Database
 	pool, err := database.Connect(databaseURL)
@@ -94,7 +107,7 @@ func main() {
 
 	// Services
 	ctClient := ctlog.NewClient(ctLogURL)
-	mon := monitor.New(ctClient, keywordRepo, certRepo, monitorRepo, monitorBatchSize, monitorInterval)
+	mon := monitor.New(ctClient, keywordRepo, certRepo, monitorRepo, monitorBatchSize, monitorInterval, monitorReprocessOnIdle)
 
 	// Handlers
 	kwHandler := handler.NewKeywordHandler(keywordRepo)

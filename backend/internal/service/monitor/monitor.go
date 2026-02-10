@@ -47,13 +47,13 @@ type Monitor struct {
 	batchSize int
 	interval  time.Duration
 
+	// reprocessOnIdle controls behavior when no new entries are available.
+	// false (default): skip processing when caught up (efficient, production)
+	// true: re-fetch and re-process the last batch (useful for testing/demo)
+	reprocessOnIdle bool
+
 	mu     sync.Mutex
 	cancel context.CancelFunc
-
-	// Cache of the last fetched batch for re-matching when keywords change.
-	// Only accessed from the monitor goroutine — no mutex needed.
-	cachedEntries []ctlog.RawEntry
-	cachedStart   int64
 }
 
 func New(
@@ -63,14 +63,16 @@ func New(
 	st stateStore,
 	batchSize int,
 	interval time.Duration,
+	reprocessOnIdle bool,
 ) *Monitor {
 	return &Monitor{
-		ctClient:  ct,
-		keywords:  kw,
-		certs:     cert,
-		state:     st,
-		batchSize: batchSize,
-		interval:  interval,
+		ctClient:        ct,
+		keywords:        kw,
+		certs:           cert,
+		state:           st,
+		batchSize:       batchSize,
+		interval:        interval,
+		reprocessOnIdle: reprocessOnIdle,
 	}
 }
 
@@ -181,12 +183,13 @@ func (m *Monitor) processBatch(ctx context.Context) {
 	}
 	end := min(start+int64(m.batchSize)-1, sth.TreeSize-1)
 
-	// 4. Get entries — either fresh from the CT log or from cache
+	// 4. Get entries — either new from CT log or re-fetch for reprocessing
 	var entries []ctlog.RawEntry
 	var batchStart int64
-	newEntries := start <= end
+	hasNewEntries := start <= end
 
-	if newEntries {
+	if hasNewEntries {
+		// Fetch fresh entries from CT log
 		logger.Info("fetching CT log entries",
 			"start", start, "end", end, "tree_size", sth.TreeSize)
 
@@ -198,14 +201,14 @@ func (m *Monitor) processBatch(ctx context.Context) {
 		}
 		batchStart = start
 
-		// Cache for re-matching on idle ticks
-		m.cachedEntries = entries
-		m.cachedStart = batchStart
-	} else {
-		entries = m.cachedEntries
-		batchStart = m.cachedStart
-		if len(entries) == 0 {
-			logger.Info("no new entries and no cached data", "tree_size", sth.TreeSize)
+	} else if m.reprocessOnIdle {
+		// No new entries, but reprocess mode enabled — re-fetch last batch
+		reprocessStart := max(0, state.LastProcessedIndex-int64(m.batchSize))
+		reprocessEnd := state.LastProcessedIndex - 1
+
+		if reprocessStart > reprocessEnd {
+			// No previous batch to reprocess (first run)
+			logger.Info("no entries to reprocess yet")
 			m.state.Update(ctx, &model.MonitorState{
 				LastProcessedIndex:     state.LastProcessedIndex,
 				LastTreeSize:           sth.TreeSize,
@@ -215,11 +218,36 @@ func (m *Monitor) processBatch(ctx context.Context) {
 				ParseErrorsInLastCycle: state.ParseErrorsInLastCycle,
 				IsRunning:              true,
 			})
-			m.state.SetError(ctx, "")
 			return
 		}
-		logger.Info("re-matching cached entries against current keywords",
-			"cached_entries", len(entries), "tree_size", sth.TreeSize)
+
+		logger.Info("reprocessing previous batch (re-fetching from CT log)",
+			"start", reprocessStart, "end", reprocessEnd, "tree_size", sth.TreeSize)
+
+		entries, err = m.ctClient.GetEntries(ctx, reprocessStart, reprocessEnd)
+		if err != nil {
+			logger.Error("failed to re-fetch entries for reprocessing", "error", err)
+			m.state.SetError(ctx, fmt.Sprintf("failed to re-fetch entries: %v", err))
+			return
+		}
+		batchStart = reprocessStart
+
+	} else {
+		// No new entries and reprocess disabled — skip
+		logger.Info("no new entries, skipping",
+			"last_processed", start, "tree_size", sth.TreeSize)
+
+		// Update last_run_at to show monitor is still alive
+		m.state.Update(ctx, &model.MonitorState{
+			LastProcessedIndex:     state.LastProcessedIndex,
+			LastTreeSize:           sth.TreeSize,
+			TotalProcessed:         state.TotalProcessed,
+			CertsInLastCycle:       state.CertsInLastCycle,
+			MatchesInLastCycle:     state.MatchesInLastCycle,
+			ParseErrorsInLastCycle: state.ParseErrorsInLastCycle,
+			IsRunning:              true,
+		})
+		return
 	}
 
 	// 5. Load keywords
@@ -232,18 +260,8 @@ func (m *Monitor) processBatch(ctx context.Context) {
 
 	if len(keywords) == 0 {
 		logger.Info("no keywords configured, skipping matching")
-		if newEntries {
+		if hasNewEntries {
 			m.updateState(ctx, state, end, sth.TreeSize, len(entries), 0, 0)
-		} else {
-			m.state.Update(ctx, &model.MonitorState{
-				LastProcessedIndex:     state.LastProcessedIndex,
-				LastTreeSize:           sth.TreeSize,
-				TotalProcessed:         state.TotalProcessed,
-				CertsInLastCycle:       state.CertsInLastCycle,
-				MatchesInLastCycle:     0,
-				ParseErrorsInLastCycle: state.ParseErrorsInLastCycle,
-				IsRunning:              true,
-			})
 		}
 		m.state.SetError(ctx, "")
 		return
@@ -256,20 +274,22 @@ func (m *Monitor) processBatch(ctx context.Context) {
 		"entries", len(entries),
 		"parse_errors", parseErrors,
 		"matches", matchCount,
-		"cached", !newEntries,
+		"reprocessed", !hasNewEntries,
 	)
 
 	// 7. Update state and clear any previous error
-	if newEntries {
+	if hasNewEntries {
+		// New entries processed - advance processing index
 		m.updateState(ctx, state, end, sth.TreeSize, len(entries), matchCount, parseErrors)
 	} else {
+		// Reprocessed - just update match count and last_run_at
 		m.state.Update(ctx, &model.MonitorState{
 			LastProcessedIndex:     state.LastProcessedIndex,
 			LastTreeSize:           sth.TreeSize,
 			TotalProcessed:         state.TotalProcessed,
-			CertsInLastCycle:       state.CertsInLastCycle,
+			CertsInLastCycle:       len(entries),
 			MatchesInLastCycle:     matchCount,
-			ParseErrorsInLastCycle: state.ParseErrorsInLastCycle,
+			ParseErrorsInLastCycle: parseErrors,
 			IsRunning:              true,
 		})
 	}

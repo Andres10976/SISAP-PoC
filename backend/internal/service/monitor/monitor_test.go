@@ -126,7 +126,7 @@ func TestStart_Success(t *testing.T) {
 			return nil, errors.New("stub")
 		},
 	}
-	m := New(ct, &mockKeywordLister{}, &mockCertCreator{}, ss, 10, time.Hour)
+	m := New(ct, &mockKeywordLister{}, &mockCertCreator{}, ss, 10, time.Hour, false)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -157,7 +157,7 @@ func TestStart_SurvivesCanceledCallerContext(t *testing.T) {
 			return nil, errors.New("stub")
 		},
 	}
-	m := New(ct, &mockKeywordLister{}, &mockCertCreator{}, ss, 10, 20*time.Millisecond)
+	m := New(ct, &mockKeywordLister{}, &mockCertCreator{}, ss, 10, 20*time.Millisecond, false)
 
 	// Start with a context, then immediately cancel it — simulates
 	// an HTTP handler returning before the goroutine runs.
@@ -192,7 +192,7 @@ func TestStart_AlreadyRunning(t *testing.T) {
 			return nil, errors.New("stub")
 		},
 	}
-	m := New(ct, &mockKeywordLister{}, &mockCertCreator{}, ss, 10, time.Hour)
+	m := New(ct, &mockKeywordLister{}, &mockCertCreator{}, ss, 10, time.Hour, false)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -211,7 +211,7 @@ func TestStart_SetRunningError(t *testing.T) {
 	ss := &mockStateStore{
 		setRunningFn: func(ctx context.Context, running bool) error { return dbErr },
 	}
-	m := New(&mockCTClient{}, &mockKeywordLister{}, &mockCertCreator{}, ss, 10, time.Hour)
+	m := New(&mockCTClient{}, &mockKeywordLister{}, &mockCertCreator{}, ss, 10, time.Hour, false)
 
 	err := m.Start(context.Background())
 	if !errors.Is(err, dbErr) {
@@ -234,7 +234,7 @@ func TestStop_Success(t *testing.T) {
 			return nil, errors.New("stub")
 		},
 	}
-	m := New(ct, &mockKeywordLister{}, &mockCertCreator{}, ss, 10, time.Hour)
+	m := New(ct, &mockKeywordLister{}, &mockCertCreator{}, ss, 10, time.Hour, false)
 
 	ctx := context.Background()
 	m.Start(ctx)
@@ -249,7 +249,7 @@ func TestStop_Success(t *testing.T) {
 }
 
 func TestStop_NotRunning(t *testing.T) {
-	m := New(&mockCTClient{}, &mockKeywordLister{}, &mockCertCreator{}, &mockStateStore{}, 10, time.Hour)
+	m := New(&mockCTClient{}, &mockKeywordLister{}, &mockCertCreator{}, &mockStateStore{}, 10, time.Hour, false)
 
 	err := m.Stop(context.Background())
 	if !errors.Is(err, ErrNotRunning) {
@@ -258,7 +258,7 @@ func TestStop_NotRunning(t *testing.T) {
 }
 
 func TestIsRunning_DefaultFalse(t *testing.T) {
-	m := New(&mockCTClient{}, &mockKeywordLister{}, &mockCertCreator{}, &mockStateStore{}, 10, time.Hour)
+	m := New(&mockCTClient{}, &mockKeywordLister{}, &mockCertCreator{}, &mockStateStore{}, 10, time.Hour, false)
 	if m.IsRunning() {
 		t.Error("IsRunning() = true for new monitor")
 	}
@@ -302,7 +302,7 @@ func TestProcessBatch_Success(t *testing.T) {
 				return nil
 			},
 		},
-		10, time.Hour,
+		10, time.Hour, false,
 	)
 
 	m.processBatch(context.Background())
@@ -347,7 +347,7 @@ func TestProcessBatch_STHError(t *testing.T) {
 				return nil, nil
 			},
 		},
-		10, time.Hour,
+		10, time.Hour, false,
 	)
 
 	m.processBatch(context.Background())
@@ -376,7 +376,7 @@ func TestProcessBatch_StateGetError(t *testing.T) {
 				return nil, errors.New("db error")
 			},
 		},
-		10, time.Hour,
+		10, time.Hour, false,
 	)
 
 	m.processBatch(context.Background())
@@ -411,7 +411,7 @@ func TestProcessBatch_NoNewEntries(t *testing.T) {
 				return nil
 			},
 		},
-		10, time.Hour,
+		10, time.Hour, false, // reprocessOnIdle=false
 	)
 
 	m.processBatch(context.Background())
@@ -419,8 +419,10 @@ func TestProcessBatch_NoNewEntries(t *testing.T) {
 	if entriesCalled {
 		t.Error("GetEntries should not be called when start > end")
 	}
+
+	// State SHOULD be updated to refresh last_run_at
 	if updatedState == nil {
-		t.Fatal("state should still be updated when no new entries (to bump updated_at)")
+		t.Fatal("state should be updated even when no new entries (to update last_run_at)")
 	}
 	if updatedState.LastProcessedIndex != 100 {
 		t.Errorf("LastProcessedIndex = %d, want 100 (unchanged)", updatedState.LastProcessedIndex)
@@ -460,7 +462,7 @@ func TestProcessBatch_NoKeywords(t *testing.T) {
 				return nil
 			},
 		},
-		10, time.Hour,
+		10, time.Hour, false,
 	)
 
 	m.processBatch(context.Background())
@@ -511,7 +513,7 @@ func TestProcessBatch_ParseErrorSkipped(t *testing.T) {
 			},
 			updateFn: func(ctx context.Context, state *model.MonitorState) error { return nil },
 		},
-		10, time.Hour,
+		10, time.Hour, false,
 	)
 
 	m.processBatch(context.Background())
@@ -554,7 +556,7 @@ func TestProcessBatch_CertStoreError(t *testing.T) {
 				return nil
 			},
 		},
-		10, time.Hour,
+		10, time.Hour, false,
 	)
 
 	m.processBatch(context.Background())
@@ -592,7 +594,7 @@ func TestProcessBatch_FirstBatch_StartsNearTreeSize(t *testing.T) {
 			},
 			updateFn: func(ctx context.Context, state *model.MonitorState) error { return nil },
 		},
-		50, time.Hour,
+		50, time.Hour, false,
 	)
 
 	m.processBatch(context.Background())
@@ -624,7 +626,7 @@ func TestProcessBatch_STHError_PersistsError(t *testing.T) {
 				return nil
 			},
 		},
-		10, time.Hour,
+		10, time.Hour, false,
 	)
 
 	m.processBatch(context.Background())
@@ -675,7 +677,7 @@ func TestProcessBatch_Success_ClearsError(t *testing.T) {
 				return nil
 			},
 		},
-		10, time.Hour,
+		10, time.Hour, false,
 	)
 
 	m.processBatch(context.Background())
@@ -713,7 +715,7 @@ func TestRun_PanicRecovery(t *testing.T) {
 		},
 	}
 
-	m := New(ct, &mockKeywordLister{}, &mockCertCreator{}, ss, 10, time.Hour)
+	m := New(ct, &mockKeywordLister{}, &mockCertCreator{}, ss, 10, time.Hour, false)
 	// Manually set cancel so we can verify it gets cleared
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -746,82 +748,3 @@ func TestRun_PanicRecovery(t *testing.T) {
 	}
 }
 
-// --- cache re-matching tests ---
-
-func TestProcessBatch_CacheReMatchOnNewKeyword(t *testing.T) {
-	der := selfSignedDER(t, "example.com", []string{"www.example.com"})
-	leaf := buildLeaf(t, der)
-
-	callCount := 0
-	var storedCerts []*model.MatchedCertificate
-
-	ct := &mockCTClient{
-		getSTHFn: func(ctx context.Context) (*ctlog.STH, error) {
-			return &ctlog.STH{TreeSize: 200}, nil
-		},
-		getEntriesFn: func(ctx context.Context, start, end int64) ([]ctlog.RawEntry, error) {
-			return []ctlog.RawEntry{{LeafInput: leaf}}, nil
-		},
-	}
-
-	keywords := []model.Keyword{}
-	kw := &mockKeywordLister{
-		listFn: func(ctx context.Context) ([]model.Keyword, error) {
-			return keywords, nil
-		},
-	}
-
-	cc := &mockCertCreator{
-		createFn: func(ctx context.Context, cert *model.MatchedCertificate) error {
-			storedCerts = append(storedCerts, cert)
-			return nil
-		},
-	}
-
-	var updatedState *model.MonitorState
-	ss := &mockStateStore{
-		getFn: func(ctx context.Context) (*model.MonitorState, error) {
-			if callCount == 0 {
-				return &model.MonitorState{LastProcessedIndex: 100}, nil
-			}
-			// Second call: caught up to tree size — forces cache path
-			return &model.MonitorState{
-				LastProcessedIndex: 200,
-				CertsInLastCycle:   1,
-			}, nil
-		},
-		updateFn: func(ctx context.Context, state *model.MonitorState) error {
-			updatedState = state
-			callCount++
-			return nil
-		},
-	}
-
-	m := New(ct, kw, cc, ss, 10, time.Hour)
-
-	// First batch: no keywords, entries are fetched and cached
-	m.processBatch(context.Background())
-
-	if len(storedCerts) != 0 {
-		t.Errorf("first batch: expected 0 stored certs (no keywords), got %d", len(storedCerts))
-	}
-
-	// Now add a keyword
-	keywords = []model.Keyword{{ID: 1, Value: "example"}}
-
-	// Second batch: no new entries, but cached entries get re-matched
-	m.processBatch(context.Background())
-
-	if len(storedCerts) != 1 {
-		t.Fatalf("second batch: expected 1 stored cert (re-match), got %d", len(storedCerts))
-	}
-	if storedCerts[0].KeywordID != 1 {
-		t.Errorf("storedCerts[0].KeywordID = %d, want 1", storedCerts[0].KeywordID)
-	}
-	if updatedState == nil {
-		t.Fatal("state should be updated on re-match")
-	}
-	if updatedState.MatchesInLastCycle != 1 {
-		t.Errorf("MatchesInLastCycle = %d, want 1", updatedState.MatchesInLastCycle)
-	}
-}
