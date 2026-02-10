@@ -35,14 +35,13 @@ docker compose up -d db
 ## Architecture
 
 ```
-cmd/server/main.go          Entry point — wires everything, graceful shutdown
+cmd/server/main.go          Entry point — reads config from env, wires everything, graceful shutdown
 internal/
-  config/                    Env-based config (Load panics on missing DATABASE_URL)
   database/                  pgxpool connection + embedded SQL migrations
   model/                     Domain structs (Keyword, MatchedCertificate, MonitorState)
   repository/                PostgreSQL queries (one repo per model)
   handler/                   HTTP handlers (chi router, JSON responses)
-  middleware/                 CORS, request ID, structured logging, panic recovery
+  middleware/                 CORS, panic recovery
   service/
     ctlog/                   CT log HTTP client + leaf certificate parser
     matcher/                 Keyword-to-domain substring matching

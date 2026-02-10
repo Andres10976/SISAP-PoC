@@ -10,6 +10,24 @@ React + TypeScript SPA for the Certificate Transparency Brand Monitor PoC.
 - **Tailwind CSS v4** via `@tailwindcss/vite` plugin
 - **Vitest 4** with `jsdom` environment and `@testing-library/react`
 
+## Local Development vs Docker
+
+**Local development (recommended):** Run the dev server with hot reload:
+```bash
+npm run dev        # Start dev server on :3000 (proxies /api → localhost:8080)
+```
+
+Requires the backend to be running on `:8080` (see `backend/CLAUDE.md` Quick Reference).
+
+**Docker:** Build and serve the production bundle:
+```bash
+npm run build      # Type-check (tsc) then build for production
+docker build -t ct-frontend .
+docker run -p 3000:80 ct-frontend  # Runs via nginx
+```
+
+This is typically only used as part of the full stack (`docker compose up --build` from the repo root).
+
 ## Commands
 
 ```bash

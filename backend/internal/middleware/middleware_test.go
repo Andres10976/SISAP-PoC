@@ -47,43 +47,6 @@ func TestCORS_OptionsShortCircuit(t *testing.T) {
 	}
 }
 
-func TestRequestID_GeneratesWhenMissing(t *testing.T) {
-	handler := RequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Request-ID") == "" {
-			t.Error("request should have X-Request-ID set")
-		}
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if got := rec.Header().Get("X-Request-ID"); got == "" {
-		t.Error("response should have X-Request-ID header")
-	}
-	// Generated IDs are 16 hex chars (8 bytes)
-	if got := rec.Header().Get("X-Request-ID"); len(got) != 16 {
-		t.Errorf("generated ID length = %d, want 16", len(got))
-	}
-}
-
-func TestRequestID_PreservesExisting(t *testing.T) {
-	handler := RequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Request-ID") != "my-custom-id" {
-			t.Errorf("request ID = %q, want %q", r.Header.Get("X-Request-ID"), "my-custom-id")
-		}
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("X-Request-ID", "my-custom-id")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if got := rec.Header().Get("X-Request-ID"); got != "my-custom-id" {
-		t.Errorf("response X-Request-ID = %q, want %q", got, "my-custom-id")
-	}
-}
-
 func TestRecovery_NoPanic(t *testing.T) {
 	handler := Recovery(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -112,24 +75,5 @@ func TestRecovery_Panic(t *testing.T) {
 	}
 	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
 		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
-	}
-}
-
-func TestLogger_Passthrough(t *testing.T) {
-	called := false
-	handler := Logger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusCreated)
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if !called {
-		t.Error("next handler was not called")
-	}
-	if rec.Code != http.StatusCreated {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusCreated)
 	}
 }

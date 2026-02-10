@@ -12,23 +12,36 @@ docs/            Specs and requirements
 docker-compose.yml
 ```
 
-## Quick Start
+## Quick Start (Local Development — Recommended)
 
+**Terminal 1: Start the database**
 ```bash
-# Full stack (DB + backend + frontend)
-docker compose up --build
-
-# DB only (for local backend/frontend dev)
 docker compose up -d db
-
-# Backend (in separate terminal, requires running DB)
-DATABASE_URL="postgres://ctmonitor:ctmonitor_dev@localhost:5432/ct_monitor?sslmode=disable" go run ./backend/cmd/server
-
-# Frontend (in separate terminal)
-cd frontend && npm run dev
 ```
 
-The frontend dev server (`:3000`) proxies `/api` to the backend (`:8080`).
+**Terminal 2: Start the backend**
+```bash
+cd backend
+DATABASE_URL="postgres://ctmonitor:ctmonitor_dev@localhost:5432/ct_monitor?sslmode=disable" go run ./cmd/server
+```
+
+**Terminal 3: Start the frontend**
+```bash
+cd frontend
+npm run dev
+```
+
+The frontend dev server (`:3000`) proxies `/api` to the backend (`:8080`). This is the fastest workflow for local iteration.
+
+## Docker Compose (Optional — for production preview)
+
+To preview the full stack with nginx as it would run in production:
+
+```bash
+docker compose up --build
+```
+
+This starts all services (`db`, `backend`, `frontend` on nginx) and is useful for testing the production deployment configuration.
 
 ## Tech Stack
 
