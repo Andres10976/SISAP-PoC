@@ -11,12 +11,12 @@ export function useMonitorStatus(pollInterval: number = 5000) {
 
   const start = useCallback(async () => {
     await api.startMonitor();
-    refresh();
+    await refresh();
   }, [refresh]);
 
   const stop = useCallback(async () => {
     await api.stopMonitor();
-    refresh();
+    await refresh();
   }, [refresh]);
 
   return { status: data, error, loading, start, stop, refresh };

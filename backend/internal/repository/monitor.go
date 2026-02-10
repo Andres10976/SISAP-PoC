@@ -22,12 +22,12 @@ func (r *MonitorRepository) Get(ctx context.Context) (*model.MonitorState, error
 	err := r.pool.QueryRow(ctx,
 		`SELECT last_processed_index, last_tree_size, last_run_at,
 			total_processed, certs_in_last_cycle, matches_in_last_cycle,
-			is_running, updated_at
+			parse_errors_in_last_cycle, is_running, updated_at
 		FROM monitor_state WHERE id = 1`,
 	).Scan(
 		&s.LastProcessedIndex, &s.LastTreeSize, &s.LastRunAt,
 		&s.TotalProcessed, &s.CertsInLastCycle, &s.MatchesInLastCycle,
-		&s.IsRunning, &s.UpdatedAt,
+		&s.ParseErrorsInLastCycle, &s.IsRunning, &s.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -45,12 +45,13 @@ func (r *MonitorRepository) Update(ctx context.Context, state *model.MonitorStat
 			total_processed = $4,
 			certs_in_last_cycle = $5,
 			matches_in_last_cycle = $6,
-			is_running = $7,
-			updated_at = $8
+			parse_errors_in_last_cycle = $7,
+			is_running = $8,
+			updated_at = $9
 		WHERE id = 1`,
 		state.LastProcessedIndex, state.LastTreeSize, now,
 		state.TotalProcessed, state.CertsInLastCycle, state.MatchesInLastCycle,
-		state.IsRunning, now,
+		state.ParseErrorsInLastCycle, state.IsRunning, now,
 	)
 	return err
 }

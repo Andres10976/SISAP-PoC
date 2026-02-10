@@ -1,0 +1,69 @@
+About the job
+💻 Buscamos un Full Stack Software Engineer (Threat Intelligence Platform)
+
+🌍 Ubicación: LATAM
+
+
+
+¿Te apasiona crear tecnología que protege organizaciones a nivel global?
+
+
+
+Buscamos personas que disfruten resolver problemas complejos, aprendan rápido y prosperen en una cultura de alto desempeño. Este rol combina el desafío de construir interfaces web responsivas e intuitivas con el desarrollo de sistemas backend robustos y escalables que procesan grandes volúmenes de datos en tiempo real.
+
+
+
+⚙️ Lo que harás:
+
+
+
+Frontend Development
+
+Diseñar e implementar aplicaciones web responsivas y de alto rendimiento con React, Tailwind y TypeScript.
+Crear dashboards intuitivos para visualizar datos complejos de inteligencia de amenazas.
+Desarrollar interfaces interactivas para herramientas de Threat Hunting.
+Construir librerías de componentes reutilizables y optimizar el rendimiento del frontend para grandes volúmenes de datos.
+
+
+Backend Development
+
+Desarrollar microservicios y APIs escalables en Golang.
+Diseñar APIs RESTful con middleware personalizado.
+Crear servicios backend para mapeo de superficie de ataque.
+Optimizar consultas SQL (PostgreSQL, ClickHouse) y contribuir a las prácticas DevOps (CI/CD, monitoreo).
+
+
+Full Stack Integration
+
+Diseñar características de extremo a extremo, desde la base de datos hasta la interfaz.
+Implementar sincronización de datos en tiempo real y asegurar integración fluida entre servicios de inteligencia.
+Construir componentes de infraestructura que soporten ambientes de desarrollo y producción.
+
+
+🧠 Lo que buscamos
+
+3–5+ años de experiencia profesional en desarrollo Full Stack.
+Dominio de React, TypeScript y Golang.
+Conocimientos en Docker, Kubernetes, Git, REST APIs y bases de datos SQL.
+Experiencia con herramientas modernas (Webpack, Vite) y arquitecturas de microservicios.
+Deseable conocimiento en RabbitMQ, Kafka, WebSockets, PASETO, y visualización de datos (D3.js, Chart.js).
+Experiencia en nube (AWS, GCP o Azure) y sistemas distribuidos.
+
+
+🌟 Plus que te destacará
+
+Experiencia en ciberseguridad, Threat Intelligence u OSINT.
+Conocimiento de protocolos de red y estándares como STIX/TAXII.
+
+
+🧩 Lo que construirás
+
+Interfaces dinámicas de inteligencia de amenazas utilizadas por analistas y equipos IR a nivel global.
+APIs y servicios que impulsan las capacidades de detección de la plataforma.
+Infraestructura capaz de procesar miles de millones de indicadores de amenazas diariamente.
+Sistemas de integración que conectan múltiples fuentes y servicios de inteligencia.
+
+
+🔐 En SISAP creemos que la tecnología protege, pero las personas transforman.
+
+Únete a un equipo que combina ingeniería de clase mundial con una cultura de crecimiento, propósito y confianza.

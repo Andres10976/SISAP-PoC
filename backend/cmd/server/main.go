@@ -55,10 +55,10 @@ func main() {
 
 	// Router
 	r := chi.NewRouter()
+	r.Use(middleware.CORS(cfg.CORSAllowOrigin))
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recovery)
-	r.Use(middleware.CORS(cfg.CORSAllowOrigin))
 
 	r.Route("/api/v1", func(r chi.Router) {
 		kwHandler.RegisterRoutes(r)
@@ -68,8 +68,11 @@ func main() {
 
 	// Server with graceful shutdown
 	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%s", cfg.ServerPort),
-		Handler: r,
+		Addr:         fmt.Sprintf(":%s", cfg.ServerPort),
+		Handler:      r,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

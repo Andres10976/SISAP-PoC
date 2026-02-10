@@ -5,13 +5,18 @@ import { CertificateTable } from "./components/certificates/CertificateTable";
 import { useKeywords } from "./hooks/useKeywords";
 import { useCertificates } from "./hooks/useCertificates";
 import { useMonitorStatus } from "./hooks/useMonitorStatus";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 export default function App() {
   const keywords = useKeywords();
   const monitor = useMonitorStatus();
   const [page, setPage] = useState(1);
   const [filterKeyword, setFilterKeyword] = useState<number | undefined>();
+
+  const handleFilterChange = useCallback((keywordId: number | undefined) => {
+    setFilterKeyword(keywordId);
+    setPage(1);
+  }, []);
 
   const certificates = useCertificates({
     page,
@@ -33,7 +38,7 @@ export default function App() {
           loading={keywords.loading}
           onAdd={keywords.addKeyword}
           onRemove={keywords.removeKeyword}
-          onFilter={setFilterKeyword}
+          onFilter={handleFilterChange}
           activeFilter={filterKeyword}
         />
         <CertificateTable
@@ -43,7 +48,6 @@ export default function App() {
           perPage={20}
           loading={certificates.loading}
           onPageChange={setPage}
-          keywords={keywords.keywords}
         />
       </div>
     </Layout>

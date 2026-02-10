@@ -38,3 +38,5 @@ CREATE TABLE IF NOT EXISTS monitor_state (
 );
 
 INSERT INTO monitor_state (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+ALTER TABLE monitor_state ADD COLUMN IF NOT EXISTS parse_errors_in_last_cycle INTEGER NOT NULL DEFAULT 0;

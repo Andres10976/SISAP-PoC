@@ -1,4 +1,4 @@
-import { request } from "./client";
+import { request, API_BASE } from "./client";
 import type { CertificatesResponse } from "../types/certificate";
 
 export function fetchCertificates(
@@ -17,6 +17,5 @@ export function fetchCertificates(
 }
 
 export function exportCertificatesUrl(): string {
-  const base = import.meta.env.VITE_API_URL ?? "/api/v1";
-  return `${base}/certificates/export`;
+  return `${API_BASE}/certificates/export`;
 }

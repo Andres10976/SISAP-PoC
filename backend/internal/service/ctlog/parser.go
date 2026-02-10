@@ -28,7 +28,10 @@ type ParsedCertificate struct {
 
 // ParseLeafInput decodes a MerkleTreeLeaf binary blob into a ParsedCertificate.
 // It handles both x509_entry and precert_entry types.
-func ParseLeafInput(data []byte) (*ParsedCertificate, error) {
+// For precert entries (type 1), the actual certificate is extracted from extraData
+// (the entry's extra_data field) because leaf_input only contains the TBS, which
+// is not a valid DER certificate.
+func ParseLeafInput(data []byte, extraData []byte) (*ParsedCertificate, error) {
 	if len(data) < 15 {
 		return nil, ErrTooShort
 	}
@@ -50,17 +53,16 @@ func ParseLeafInput(data []byte) (*ParsedCertificate, error) {
 		}
 		certDER = data[15:end]
 
-	case 1: // precert_entry
-		if len(data) < 47 {
-			return nil, ErrTooShort
+	case 1: // precert_entry — extract certificate from extra_data
+		if len(extraData) < 3 {
+			return nil, fmt.Errorf("%w: precert extra_data too short", ErrTooShort)
 		}
-		// Skip 32-byte issuer_key_hash at offset 12
-		tbsLen := readUint24(data[44:47])
-		end := 47 + tbsLen
-		if len(data) < end {
-			return nil, ErrTooShort
+		certLen := readUint24(extraData[0:3])
+		end := 3 + certLen
+		if len(extraData) < end {
+			return nil, fmt.Errorf("%w: precert extra_data truncated", ErrTooShort)
 		}
-		certDER = data[47:end]
+		certDER = extraData[3:end]
 
 	default:
 		return nil, fmt.Errorf("%w: %d", ErrUnknownType, entryType)

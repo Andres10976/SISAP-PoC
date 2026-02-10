@@ -110,6 +110,9 @@ func TestRecovery_Panic(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
 	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
+	}
 }
 
 func TestLogger_Passthrough(t *testing.T) {

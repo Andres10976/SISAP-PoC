@@ -135,6 +135,19 @@ func TestKeywordCreate_EmptyValue(t *testing.T) {
 	}
 }
 
+func TestKeywordCreate_TooShort(t *testing.T) {
+	h := NewKeywordHandler(&mockKeywordStore{})
+
+	body := strings.NewReader(`{"value":"ab"}`)
+	req := httptest.NewRequest(http.MethodPost, "/keywords", body)
+	rec := httptest.NewRecorder()
+	h.Create(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
 func TestKeywordCreate_InvalidJSON(t *testing.T) {
 	h := NewKeywordHandler(&mockKeywordStore{})
 

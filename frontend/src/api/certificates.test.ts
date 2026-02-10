@@ -3,6 +3,7 @@ import { request } from "./client";
 
 vi.mock("./client", () => ({
   request: vi.fn(),
+  API_BASE: "/api/v1",
 }));
 
 const mockRequest = vi.mocked(request);
@@ -45,13 +46,7 @@ describe("certificates API", () => {
     expect(params.get("per_page")).toBe("20");
   });
 
-  it("exportCertificatesUrl returns the default export URL", () => {
+  it("exportCertificatesUrl returns the export URL using API_BASE", () => {
     expect(exportCertificatesUrl()).toBe("/api/v1/certificates/export");
-  });
-
-  it("exportCertificatesUrl uses VITE_API_URL env when set", () => {
-    vi.stubEnv("VITE_API_URL", "https://api.example.com");
-    expect(exportCertificatesUrl()).toBe("https://api.example.com/certificates/export");
-    vi.unstubAllEnvs();
   });
 });

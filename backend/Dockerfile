@@ -8,7 +8,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /server ./cmd/server
 
 # Run stage
 FROM alpine:3.21
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates && \
+    adduser -D -H -s /sbin/nologin appuser
 COPY --from=builder /server /server
+USER appuser
 EXPOSE 8080
 ENTRYPOINT ["/server"]

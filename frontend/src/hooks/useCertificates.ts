@@ -9,6 +9,8 @@ interface UseCertificatesOptions {
   pollInterval?: number; // ms, 0 to disable
 }
 
+// Not using usePolling because this hook re-fetches when page/perPage/keywordId
+// change (deps-driven refresh), which usePolling doesn't support.
 export function useCertificates({
   page,
   perPage,

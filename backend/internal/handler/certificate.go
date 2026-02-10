@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/csv"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -81,7 +82,12 @@ func (h *CertificateHandler) Export(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", `attachment; filename="matched_certificates.csv"`)
 
 	writer := csv.NewWriter(w)
-	defer writer.Flush()
+	defer func() {
+		writer.Flush()
+		if err := writer.Error(); err != nil {
+			slog.Error("csv export write error", "error", err)
+		}
+	}()
 
 	writer.Write([]string{
 		"id", "serial_number", "common_name", "sans", "issuer",

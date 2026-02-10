@@ -18,7 +18,18 @@ describe("request", () => {
     await request("/keywords");
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/keywords",
-      expect.objectContaining({ headers: { "Content-Type": "application/json" } }),
+      expect.objectContaining({ headers: {} }),
+    );
+  });
+
+  it("sets Content-Type header when body is provided", async () => {
+    const fetchMock = mockFetch({ json: () => Promise.resolve({}) });
+    await request("/keywords", { method: "POST", body: '{"value":"test"}' });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/keywords",
+      expect.objectContaining({
+        headers: { "Content-Type": "application/json" },
+      }),
     );
   });
 

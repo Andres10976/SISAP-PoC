@@ -67,6 +67,8 @@ func New(
 }
 
 // Start launches the background monitoring loop.
+// The goroutine uses a context derived from context.Background so it
+// survives after the calling HTTP request completes.
 func (m *Monitor) Start(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -75,7 +77,7 @@ func (m *Monitor) Start(ctx context.Context) error {
 		return ErrAlreadyRunning
 	}
 
-	monCtx, cancel := context.WithCancel(ctx)
+	monCtx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 
 	if err := m.state.SetRunning(ctx, true); err != nil {
@@ -89,7 +91,9 @@ func (m *Monitor) Start(ctx context.Context) error {
 }
 
 // Stop halts the monitoring loop.
-func (m *Monitor) Stop(ctx context.Context) error {
+// Uses a background context for the DB update so it succeeds even if
+// the HTTP request context is already canceled.
+func (m *Monitor) Stop(_ context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -100,7 +104,9 @@ func (m *Monitor) Stop(ctx context.Context) error {
 	m.cancel()
 	m.cancel = nil
 
-	return m.state.SetRunning(ctx, false)
+	dbCtx, dbCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer dbCancel()
+	return m.state.SetRunning(dbCtx, false)
 }
 
 // IsRunning returns whether the monitor loop is active.
@@ -174,7 +180,7 @@ func (m *Monitor) processBatch(ctx context.Context) {
 
 	if len(keywords) == 0 {
 		logger.Info("no keywords configured, skipping matching")
-		m.updateState(ctx, state, end, sth.TreeSize, len(entries), 0)
+		m.updateState(ctx, state, end, sth.TreeSize, len(entries), 0, 0)
 		return
 	}
 
@@ -182,7 +188,7 @@ func (m *Monitor) processBatch(ctx context.Context) {
 	matchCount := 0
 	parseErrors := 0
 	for i, entry := range entries {
-		cert, err := ctlog.ParseLeafInput(entry.LeafInput)
+		cert, err := ctlog.ParseLeafInput(entry.LeafInput, entry.ExtraData)
 		if err != nil {
 			parseErrors++
 			continue
@@ -216,22 +222,23 @@ func (m *Monitor) processBatch(ctx context.Context) {
 	)
 
 	// 7. Update state
-	m.updateState(ctx, state, end, sth.TreeSize, len(entries), matchCount)
+	m.updateState(ctx, state, end, sth.TreeSize, len(entries), matchCount, parseErrors)
 }
 
 func (m *Monitor) updateState(
 	ctx context.Context,
 	prev *model.MonitorState,
 	endIndex, treeSize int64,
-	processed, matches int,
+	processed, matches, parseErrors int,
 ) {
 	err := m.state.Update(ctx, &model.MonitorState{
-		LastProcessedIndex: endIndex + 1,
-		LastTreeSize:       treeSize,
-		TotalProcessed:     prev.TotalProcessed + int64(processed),
-		CertsInLastCycle:   processed,
-		MatchesInLastCycle: matches,
-		IsRunning:          true,
+		LastProcessedIndex:     endIndex + 1,
+		LastTreeSize:           treeSize,
+		TotalProcessed:         prev.TotalProcessed + int64(processed),
+		CertsInLastCycle:       processed,
+		MatchesInLastCycle:     matches,
+		ParseErrorsInLastCycle: parseErrors,
+		IsRunning:              true,
 	})
 	if err != nil {
 		slog.Error("failed to update monitor state", "error", err)

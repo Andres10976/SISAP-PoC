@@ -15,6 +15,11 @@ body {
 }
 
 /* Scrollbar styling for dark theme */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: theme(--color-gray-700) transparent;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
 }

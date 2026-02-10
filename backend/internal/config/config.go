@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"time"
@@ -49,6 +50,8 @@ func getDuration(key string, fallback time.Duration) time.Duration {
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil {
+		slog.Warn("invalid duration for env var, using default",
+			"key", key, "value", v, "default", fallback)
 		return fallback
 	}
 	return d
@@ -61,6 +64,8 @@ func getInt(key string, fallback int) int {
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil {
+		slog.Warn("invalid integer for env var, using default",
+			"key", key, "value", v, "default", fallback)
 		return fallback
 	}
 	return n

@@ -1,5 +1,4 @@
 import type { MatchedCertificate } from "../../types/certificate";
-import type { Keyword } from "../../types/keyword";
 import { CertificateRow } from "./CertificateRow";
 import { EmptyState } from "./EmptyState";
 import { Pagination } from "./Pagination";
@@ -11,7 +10,6 @@ interface CertificateTableProps {
   perPage: number;
   loading: boolean;
   onPageChange: (page: number) => void;
-  keywords: Keyword[];
 }
 
 export function CertificateTable({
@@ -21,7 +19,6 @@ export function CertificateTable({
   perPage,
   loading,
   onPageChange,
-  keywords: _keywords,
 }: CertificateTableProps) {
   const totalPages = Math.ceil(total / perPage);
 

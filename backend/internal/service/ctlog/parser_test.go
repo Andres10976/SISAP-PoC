@@ -15,6 +15,8 @@ import (
 
 // buildLeaf constructs a minimal MerkleTreeLeaf blob for testing.
 // entryType: 0 = x509_entry, 1 = precert_entry.
+// For x509_entry, certDER is embedded in the leaf. For precert_entry,
+// the leaf only contains the header (the real cert goes in extraData).
 func buildLeaf(t *testing.T, entryType uint16, certDER []byte, ts uint64) []byte {
 	t.Helper()
 
@@ -43,19 +45,26 @@ func buildLeaf(t *testing.T, entryType uint16, certDER []byte, ts uint64) []byte
 		buf = append(buf, lenBytes...)
 		buf = append(buf, certDER...)
 
-	case 1: // precert_entry: 32-byte issuer_key_hash + 3-byte length + TBS
+	case 1: // precert_entry: 32-byte issuer_key_hash + 3-byte TBS length + placeholder
+		// For precert entries the real cert lives in extra_data, not in leaf_input.
+		// We still need a valid header so the parser can read the entry type.
 		issuerHash := make([]byte, 32)
 		buf = append(buf, issuerHash...)
-		lenBytes := []byte{
-			byte(len(certDER) >> 16),
-			byte(len(certDER) >> 8),
-			byte(len(certDER)),
-		}
-		buf = append(buf, lenBytes...)
-		buf = append(buf, certDER...)
+		buf = append(buf, 0, 0, 0) // TBS length = 0 (not used by parser)
 	}
 
 	return buf
+}
+
+// buildExtraData constructs extra_data for a precert entry: 3-byte length + cert DER.
+func buildExtraData(t *testing.T, certDER []byte) []byte {
+	t.Helper()
+	lenBytes := []byte{
+		byte(len(certDER) >> 16),
+		byte(len(certDER) >> 8),
+		byte(len(certDER)),
+	}
+	return append(lenBytes, certDER...)
 }
 
 // selfSignedCert generates a self-signed certificate DER for testing.
@@ -122,7 +131,7 @@ func TestParseLeafInput_X509Entry(t *testing.T) {
 	ts := uint64(1700000000000) // some fixed timestamp
 	leaf := buildLeaf(t, 0, der, ts)
 
-	pc, err := ParseLeafInput(leaf)
+	pc, err := ParseLeafInput(leaf, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -140,9 +149,10 @@ func TestParseLeafInput_X509Entry(t *testing.T) {
 
 func TestParseLeafInput_PrecertEntry(t *testing.T) {
 	der := selfSignedCert(t, "precert.example.com", nil, "")
-	leaf := buildLeaf(t, 1, der, 1700000000000)
+	leaf := buildLeaf(t, 1, nil, 1700000000000)
+	extra := buildExtraData(t, der)
 
-	pc, err := ParseLeafInput(leaf)
+	pc, err := ParseLeafInput(leaf, extra)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -152,7 +162,7 @@ func TestParseLeafInput_PrecertEntry(t *testing.T) {
 }
 
 func TestParseLeafInput_TooShort(t *testing.T) {
-	_, err := ParseLeafInput([]byte{0, 0, 0})
+	_, err := ParseLeafInput([]byte{0, 0, 0}, nil)
 	if !errors.Is(err, ErrTooShort) {
 		t.Errorf("err = %v, want ErrTooShort", err)
 	}
@@ -166,7 +176,7 @@ func TestParseLeafInput_UnknownType(t *testing.T) {
 		leaf = append(leaf, 0)
 	}
 
-	_, err := ParseLeafInput(leaf)
+	_, err := ParseLeafInput(leaf, nil)
 	if !errors.Is(err, ErrUnknownType) {
 		t.Errorf("err = %v, want ErrUnknownType", err)
 	}
@@ -180,7 +190,7 @@ func TestParseLeafInput_TruncatedX509(t *testing.T) {
 	leaf[13] = 3
 	leaf[14] = 0xe8 // 1000
 
-	_, err := ParseLeafInput(leaf)
+	_, err := ParseLeafInput(leaf, nil)
 	if !errors.Is(err, ErrTooShort) {
 		t.Errorf("err = %v, want ErrTooShort", err)
 	}
@@ -189,7 +199,7 @@ func TestParseLeafInput_TruncatedX509(t *testing.T) {
 func TestParseLeafInput_InvalidDER(t *testing.T) {
 	leaf := buildLeaf(t, 0, []byte{0xDE, 0xAD, 0xBE, 0xEF}, 1700000000000)
 
-	_, err := ParseLeafInput(leaf)
+	_, err := ParseLeafInput(leaf, nil)
 	if !errors.Is(err, ErrParseFailed) {
 		t.Errorf("err = %v, want ErrParseFailed", err)
 	}
@@ -201,7 +211,7 @@ func TestParseLeafInput_IssuerOrgFallback(t *testing.T) {
 
 	leaf := buildLeaf(t, 0, der, 1700000000000)
 
-	pc, err := ParseLeafInput(leaf)
+	pc, err := ParseLeafInput(leaf, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

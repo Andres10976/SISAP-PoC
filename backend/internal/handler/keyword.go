@@ -47,6 +47,8 @@ func (h *KeywordHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *KeywordHandler) Create(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB
+
 	var req struct {
 		Value string `json:"value"`
 	}
@@ -58,6 +60,10 @@ func (h *KeywordHandler) Create(w http.ResponseWriter, r *http.Request) {
 	value := strings.TrimSpace(req.Value)
 	if value == "" {
 		writeError(w, http.StatusBadRequest, "keyword value cannot be empty")
+		return
+	}
+	if len(value) < 3 {
+		writeError(w, http.StatusBadRequest, "keyword must be at least 3 characters")
 		return
 	}
 

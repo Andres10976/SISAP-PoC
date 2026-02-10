@@ -136,6 +136,43 @@ func TestStart_Success(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 }
 
+func TestStart_SurvivesCanceledCallerContext(t *testing.T) {
+	ticks := make(chan struct{}, 5)
+	ss := &mockStateStore{
+		setRunningFn: func(ctx context.Context, running bool) error { return nil },
+		getFn: func(ctx context.Context) (*model.MonitorState, error) {
+			return nil, errors.New("stub")
+		},
+	}
+	ct := &mockCTClient{
+		getSTHFn: func(ctx context.Context) (*ctlog.STH, error) {
+			ticks <- struct{}{}
+			return nil, errors.New("stub")
+		},
+	}
+	m := New(ct, &mockKeywordLister{}, &mockCertCreator{}, ss, 10, 20*time.Millisecond)
+
+	// Start with a context, then immediately cancel it — simulates
+	// an HTTP handler returning before the goroutine runs.
+	callerCtx, callerCancel := context.WithCancel(context.Background())
+	if err := m.Start(callerCtx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	callerCancel()
+
+	// Wait for at least two ticks — proves the goroutine survived the canceled caller ctx.
+	for i := 0; i < 2; i++ {
+		select {
+		case <-ticks:
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for tick %d — goroutine likely died", i+1)
+		}
+	}
+
+	// Cleanup
+	m.Stop(context.Background())
+}
+
 func TestStart_AlreadyRunning(t *testing.T) {
 	ss := &mockStateStore{
 		setRunningFn: func(ctx context.Context, running bool) error { return nil },

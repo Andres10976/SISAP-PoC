@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_URL ?? "/api/v1";
+export const API_BASE = import.meta.env.VITE_API_URL ?? "/api/v1";
 
 export class ApiError extends Error {
   constructor(
@@ -15,7 +15,7 @@ export async function request<T>(
   options?: RequestInit,
 ): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers: { ...(options?.body && { "Content-Type": "application/json" }) },
     ...options,
   });
 
@@ -26,7 +26,7 @@ export async function request<T>(
     throw new ApiError(response.status, body.error ?? "Request failed");
   }
 
-  // Handle 204 No Content
+  // 204 No Content — callers use void as T for these endpoints
   if (response.status === 204) {
     return undefined as T;
   }
