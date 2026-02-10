@@ -6,5 +6,7 @@ export interface MonitorStatus {
   total_processed: number;
   certs_in_last_cycle: number;
   matches_in_last_cycle: number;
+  parse_errors_in_last_cycle: number;
+  last_error: string;
   updated_at: string;
 }

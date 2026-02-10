@@ -11,5 +11,6 @@ type MonitorState struct {
 	MatchesInLastCycle     int        `json:"matches_in_last_cycle"`
 	ParseErrorsInLastCycle int        `json:"parse_errors_in_last_cycle"`
 	IsRunning              bool       `json:"is_running"`
+	LastError              string     `json:"last_error"`
 	UpdatedAt              time.Time  `json:"updated_at"`
 }

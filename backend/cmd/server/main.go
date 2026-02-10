@@ -44,6 +44,12 @@ func main() {
 	certRepo := repository.NewCertificateRepository(pool)
 	monitorRepo := repository.NewMonitorRepository(pool)
 
+	// Reset stale monitor state from previous process crash
+	if err := monitorRepo.SetRunning(context.Background(), false); err != nil {
+		slog.Error("failed to reset monitor state", "error", err)
+		os.Exit(1)
+	}
+
 	// Services
 	ctClient := ctlog.NewClient(cfg.CTLogURL)
 	mon := monitor.New(ctClient, keywordRepo, certRepo, monitorRepo, cfg.MonitorBatchSize, cfg.MonitorInterval)

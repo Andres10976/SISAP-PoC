@@ -20,6 +20,8 @@ const mockStatus = {
   total_processed: 5000,
   certs_in_last_cycle: 100,
   matches_in_last_cycle: 3,
+  parse_errors_in_last_cycle: 0,
+  last_error: "",
   updated_at: "2024-01-01T12:00:00Z",
 };
 

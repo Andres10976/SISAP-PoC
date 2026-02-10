@@ -39,7 +39,7 @@ export function StatusBar({
           value={status?.total_processed ?? 0}
         />
         <MetricCard
-          label="Last Cycle"
+          label="Last Batch"
           value={status?.certs_in_last_cycle ?? 0}
           suffix="certs"
         />
@@ -50,12 +50,16 @@ export function StatusBar({
         <MetricCard label="Tree Size" value={status?.last_tree_size ?? 0} />
       </div>
 
-      {/* Last run time */}
-      {status?.last_run_at && (
+      {/* Error / last run time */}
+      {status?.last_error ? (
+        <span className="text-xs text-red-400 max-w-xs truncate" title={status.last_error}>
+          Error: {status.last_error}
+        </span>
+      ) : status?.last_run_at ? (
         <span className="text-xs text-gray-500">
           Last run: {new Date(status.last_run_at).toLocaleTimeString()}
         </span>
-      )}
+      ) : null}
 
       <ExportButton />
     </div>

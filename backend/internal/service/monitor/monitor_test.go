@@ -51,6 +51,7 @@ type mockStateStore struct {
 	getFn        func(ctx context.Context) (*model.MonitorState, error)
 	updateFn     func(ctx context.Context, state *model.MonitorState) error
 	setRunningFn func(ctx context.Context, running bool) error
+	setErrorFn   func(ctx context.Context, errMsg string) error
 }
 
 func (m *mockStateStore) Get(ctx context.Context) (*model.MonitorState, error) {
@@ -61,6 +62,12 @@ func (m *mockStateStore) Update(ctx context.Context, state *model.MonitorState) 
 }
 func (m *mockStateStore) SetRunning(ctx context.Context, running bool) error {
 	return m.setRunningFn(ctx, running)
+}
+func (m *mockStateStore) SetError(ctx context.Context, errMsg string) error {
+	if m.setErrorFn != nil {
+		return m.setErrorFn(ctx, errMsg)
+	}
+	return nil
 }
 
 // --- helpers ---
@@ -381,6 +388,7 @@ func TestProcessBatch_StateGetError(t *testing.T) {
 
 func TestProcessBatch_NoNewEntries(t *testing.T) {
 	entriesCalled := false
+	var updatedState *model.MonitorState
 	m := New(
 		&mockCTClient{
 			getSTHFn: func(ctx context.Context) (*ctlog.STH, error) {
@@ -398,6 +406,10 @@ func TestProcessBatch_NoNewEntries(t *testing.T) {
 				// Already processed up to tree size
 				return &model.MonitorState{LastProcessedIndex: 100}, nil
 			},
+			updateFn: func(ctx context.Context, state *model.MonitorState) error {
+				updatedState = state
+				return nil
+			},
 		},
 		10, time.Hour,
 	)
@@ -406,6 +418,12 @@ func TestProcessBatch_NoNewEntries(t *testing.T) {
 
 	if entriesCalled {
 		t.Error("GetEntries should not be called when start > end")
+	}
+	if updatedState == nil {
+		t.Fatal("state should still be updated when no new entries (to bump updated_at)")
+	}
+	if updatedState.LastProcessedIndex != 100 {
+		t.Errorf("LastProcessedIndex = %d, want 100 (unchanged)", updatedState.LastProcessedIndex)
 	}
 }
 
@@ -582,5 +600,228 @@ func TestProcessBatch_FirstBatch_StartsNearTreeSize(t *testing.T) {
 	// When LastProcessedIndex is 0, start = max(0, TreeSize - batchSize) = 950
 	if requestedStart != 950 {
 		t.Errorf("start = %d, want 950 (TreeSize 1000 - batchSize 50)", requestedStart)
+	}
+}
+
+// --- error persistence tests ---
+
+func TestProcessBatch_STHError_PersistsError(t *testing.T) {
+	var lastError string
+	m := New(
+		&mockCTClient{
+			getSTHFn: func(ctx context.Context) (*ctlog.STH, error) {
+				return nil, errors.New("network error")
+			},
+		},
+		&mockKeywordLister{},
+		&mockCertCreator{},
+		&mockStateStore{
+			getFn: func(ctx context.Context) (*model.MonitorState, error) {
+				return nil, nil
+			},
+			setErrorFn: func(ctx context.Context, errMsg string) error {
+				lastError = errMsg
+				return nil
+			},
+		},
+		10, time.Hour,
+	)
+
+	m.processBatch(context.Background())
+
+	if lastError == "" {
+		t.Error("expected SetError to be called with non-empty error")
+	}
+	if lastError != "failed to get STH: network error" {
+		t.Errorf("lastError = %q, want %q", lastError, "failed to get STH: network error")
+	}
+}
+
+func TestProcessBatch_Success_ClearsError(t *testing.T) {
+	der := selfSignedDER(t, "example.com", []string{"www.example.com"})
+	leaf := buildLeaf(t, der)
+
+	var lastError string
+	setErrorCalled := false
+	m := New(
+		&mockCTClient{
+			getSTHFn: func(ctx context.Context) (*ctlog.STH, error) {
+				return &ctlog.STH{TreeSize: 200}, nil
+			},
+			getEntriesFn: func(ctx context.Context, start, end int64) ([]ctlog.RawEntry, error) {
+				return []ctlog.RawEntry{{LeafInput: leaf}}, nil
+			},
+		},
+		&mockKeywordLister{
+			listFn: func(ctx context.Context) ([]model.Keyword, error) {
+				return []model.Keyword{{ID: 1, Value: "example"}}, nil
+			},
+		},
+		&mockCertCreator{
+			createFn: func(ctx context.Context, cert *model.MatchedCertificate) error {
+				return nil
+			},
+		},
+		&mockStateStore{
+			getFn: func(ctx context.Context) (*model.MonitorState, error) {
+				return &model.MonitorState{LastProcessedIndex: 100}, nil
+			},
+			updateFn: func(ctx context.Context, state *model.MonitorState) error {
+				return nil
+			},
+			setErrorFn: func(ctx context.Context, errMsg string) error {
+				setErrorCalled = true
+				lastError = errMsg
+				return nil
+			},
+		},
+		10, time.Hour,
+	)
+
+	m.processBatch(context.Background())
+
+	if !setErrorCalled {
+		t.Error("expected SetError to be called to clear error")
+	}
+	if lastError != "" {
+		t.Errorf("lastError = %q, want empty string (error should be cleared)", lastError)
+	}
+}
+
+// --- panic recovery tests ---
+
+func TestRun_PanicRecovery(t *testing.T) {
+	setRunningCalled := make(chan bool, 1)
+	var panicError string
+
+	ss := &mockStateStore{
+		setRunningFn: func(ctx context.Context, running bool) error {
+			if !running {
+				setRunningCalled <- running
+			}
+			return nil
+		},
+		setErrorFn: func(ctx context.Context, errMsg string) error {
+			panicError = errMsg
+			return nil
+		},
+	}
+
+	ct := &mockCTClient{
+		getSTHFn: func(ctx context.Context) (*ctlog.STH, error) {
+			panic("test panic in processBatch")
+		},
+	}
+
+	m := New(ct, &mockKeywordLister{}, &mockCertCreator{}, ss, 10, time.Hour)
+	// Manually set cancel so we can verify it gets cleared
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	m.cancel = cancel
+
+	go m.run(ctx)
+
+	select {
+	case running := <-setRunningCalled:
+		if running {
+			t.Error("expected SetRunning(false) after panic")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for panic recovery to call SetRunning(false)")
+	}
+
+	// Verify cancel was cleared
+	m.mu.Lock()
+	cancelNil := m.cancel == nil
+	m.mu.Unlock()
+	if !cancelNil {
+		t.Error("expected m.cancel to be nil after panic recovery")
+	}
+
+	if panicError == "" {
+		t.Error("expected SetError to be called with panic message")
+	}
+	if panicError != "panic: test panic in processBatch" {
+		t.Errorf("panicError = %q, want %q", panicError, "panic: test panic in processBatch")
+	}
+}
+
+// --- cache re-matching tests ---
+
+func TestProcessBatch_CacheReMatchOnNewKeyword(t *testing.T) {
+	der := selfSignedDER(t, "example.com", []string{"www.example.com"})
+	leaf := buildLeaf(t, der)
+
+	callCount := 0
+	var storedCerts []*model.MatchedCertificate
+
+	ct := &mockCTClient{
+		getSTHFn: func(ctx context.Context) (*ctlog.STH, error) {
+			return &ctlog.STH{TreeSize: 200}, nil
+		},
+		getEntriesFn: func(ctx context.Context, start, end int64) ([]ctlog.RawEntry, error) {
+			return []ctlog.RawEntry{{LeafInput: leaf}}, nil
+		},
+	}
+
+	keywords := []model.Keyword{}
+	kw := &mockKeywordLister{
+		listFn: func(ctx context.Context) ([]model.Keyword, error) {
+			return keywords, nil
+		},
+	}
+
+	cc := &mockCertCreator{
+		createFn: func(ctx context.Context, cert *model.MatchedCertificate) error {
+			storedCerts = append(storedCerts, cert)
+			return nil
+		},
+	}
+
+	var updatedState *model.MonitorState
+	ss := &mockStateStore{
+		getFn: func(ctx context.Context) (*model.MonitorState, error) {
+			if callCount == 0 {
+				return &model.MonitorState{LastProcessedIndex: 100}, nil
+			}
+			// Second call: caught up to tree size — forces cache path
+			return &model.MonitorState{
+				LastProcessedIndex: 200,
+				CertsInLastCycle:   1,
+			}, nil
+		},
+		updateFn: func(ctx context.Context, state *model.MonitorState) error {
+			updatedState = state
+			callCount++
+			return nil
+		},
+	}
+
+	m := New(ct, kw, cc, ss, 10, time.Hour)
+
+	// First batch: no keywords, entries are fetched and cached
+	m.processBatch(context.Background())
+
+	if len(storedCerts) != 0 {
+		t.Errorf("first batch: expected 0 stored certs (no keywords), got %d", len(storedCerts))
+	}
+
+	// Now add a keyword
+	keywords = []model.Keyword{{ID: 1, Value: "example"}}
+
+	// Second batch: no new entries, but cached entries get re-matched
+	m.processBatch(context.Background())
+
+	if len(storedCerts) != 1 {
+		t.Fatalf("second batch: expected 1 stored cert (re-match), got %d", len(storedCerts))
+	}
+	if storedCerts[0].KeywordID != 1 {
+		t.Errorf("storedCerts[0].KeywordID = %d, want 1", storedCerts[0].KeywordID)
+	}
+	if updatedState == nil {
+		t.Fatal("state should be updated on re-match")
+	}
+	if updatedState.MatchesInLastCycle != 1 {
+		t.Errorf("MatchesInLastCycle = %d, want 1", updatedState.MatchesInLastCycle)
 	}
 }

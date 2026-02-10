@@ -3,7 +3,9 @@ package monitor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -34,6 +36,7 @@ type stateStore interface {
 	Get(ctx context.Context) (*model.MonitorState, error)
 	Update(ctx context.Context, state *model.MonitorState) error
 	SetRunning(ctx context.Context, running bool) error
+	SetError(ctx context.Context, errMsg string) error
 }
 
 type Monitor struct {
@@ -46,6 +49,11 @@ type Monitor struct {
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
+
+	// Cache of the last fetched batch for re-matching when keywords change.
+	// Only accessed from the monitor goroutine — no mutex needed.
+	cachedEntries []ctlog.RawEntry
+	cachedStart   int64
 }
 
 func New(
@@ -117,6 +125,21 @@ func (m *Monitor) IsRunning() bool {
 }
 
 func (m *Monitor) run(ctx context.Context) {
+	slog.Info("monitor goroutine started", "batch_size", m.batchSize, "interval", m.interval)
+
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("monitor goroutine panicked", "error", r, "stack", string(debug.Stack()))
+			m.mu.Lock()
+			m.cancel = nil
+			m.mu.Unlock()
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			m.state.SetRunning(cleanupCtx, false)
+			m.state.SetError(cleanupCtx, fmt.Sprintf("panic: %v", r))
+		}
+	}()
+
 	m.processBatch(ctx)
 
 	ticker := time.NewTicker(m.interval)
@@ -139,6 +162,7 @@ func (m *Monitor) processBatch(ctx context.Context) {
 	sth, err := m.ctClient.GetSTH(ctx)
 	if err != nil {
 		logger.Error("failed to get STH", "error", err)
+		m.state.SetError(ctx, fmt.Sprintf("failed to get STH: %v", err))
 		return
 	}
 
@@ -146,6 +170,7 @@ func (m *Monitor) processBatch(ctx context.Context) {
 	state, err := m.state.Get(ctx)
 	if err != nil {
 		logger.Error("failed to get monitor state", "error", err)
+		m.state.SetError(ctx, fmt.Sprintf("failed to get monitor state: %v", err))
 		return
 	}
 
@@ -156,37 +181,107 @@ func (m *Monitor) processBatch(ctx context.Context) {
 	}
 	end := min(start+int64(m.batchSize)-1, sth.TreeSize-1)
 
-	if start > end {
-		logger.Info("no new entries to process")
-		return
-	}
+	// 4. Get entries — either fresh from the CT log or from cache
+	var entries []ctlog.RawEntry
+	var batchStart int64
+	newEntries := start <= end
 
-	logger.Info("fetching CT log entries",
-		"start", start, "end", end, "tree_size", sth.TreeSize)
+	if newEntries {
+		logger.Info("fetching CT log entries",
+			"start", start, "end", end, "tree_size", sth.TreeSize)
 
-	// 4. Fetch entries
-	entries, err := m.ctClient.GetEntries(ctx, start, end)
-	if err != nil {
-		logger.Error("failed to fetch entries", "error", err)
-		return
+		entries, err = m.ctClient.GetEntries(ctx, start, end)
+		if err != nil {
+			logger.Error("failed to fetch entries", "error", err)
+			m.state.SetError(ctx, fmt.Sprintf("failed to fetch entries: %v", err))
+			return
+		}
+		batchStart = start
+
+		// Cache for re-matching on idle ticks
+		m.cachedEntries = entries
+		m.cachedStart = batchStart
+	} else {
+		entries = m.cachedEntries
+		batchStart = m.cachedStart
+		if len(entries) == 0 {
+			logger.Info("no new entries and no cached data", "tree_size", sth.TreeSize)
+			m.state.Update(ctx, &model.MonitorState{
+				LastProcessedIndex:     state.LastProcessedIndex,
+				LastTreeSize:           sth.TreeSize,
+				TotalProcessed:         state.TotalProcessed,
+				CertsInLastCycle:       state.CertsInLastCycle,
+				MatchesInLastCycle:     state.MatchesInLastCycle,
+				ParseErrorsInLastCycle: state.ParseErrorsInLastCycle,
+				IsRunning:              true,
+			})
+			m.state.SetError(ctx, "")
+			return
+		}
+		logger.Info("re-matching cached entries against current keywords",
+			"cached_entries", len(entries), "tree_size", sth.TreeSize)
 	}
 
 	// 5. Load keywords
 	keywords, err := m.keywords.List(ctx)
 	if err != nil {
 		logger.Error("failed to load keywords", "error", err)
+		m.state.SetError(ctx, fmt.Sprintf("failed to load keywords: %v", err))
 		return
 	}
 
 	if len(keywords) == 0 {
 		logger.Info("no keywords configured, skipping matching")
-		m.updateState(ctx, state, end, sth.TreeSize, len(entries), 0, 0)
+		if newEntries {
+			m.updateState(ctx, state, end, sth.TreeSize, len(entries), 0, 0)
+		} else {
+			m.state.Update(ctx, &model.MonitorState{
+				LastProcessedIndex:     state.LastProcessedIndex,
+				LastTreeSize:           sth.TreeSize,
+				TotalProcessed:         state.TotalProcessed,
+				CertsInLastCycle:       state.CertsInLastCycle,
+				MatchesInLastCycle:     0,
+				ParseErrorsInLastCycle: state.ParseErrorsInLastCycle,
+				IsRunning:              true,
+			})
+		}
+		m.state.SetError(ctx, "")
 		return
 	}
 
 	// 6. Parse and match
-	matchCount := 0
-	parseErrors := 0
+	matchCount, parseErrors := m.matchEntries(ctx, entries, batchStart, keywords)
+
+	logger.Info("batch processed",
+		"entries", len(entries),
+		"parse_errors", parseErrors,
+		"matches", matchCount,
+		"cached", !newEntries,
+	)
+
+	// 7. Update state and clear any previous error
+	if newEntries {
+		m.updateState(ctx, state, end, sth.TreeSize, len(entries), matchCount, parseErrors)
+	} else {
+		m.state.Update(ctx, &model.MonitorState{
+			LastProcessedIndex:     state.LastProcessedIndex,
+			LastTreeSize:           sth.TreeSize,
+			TotalProcessed:         state.TotalProcessed,
+			CertsInLastCycle:       state.CertsInLastCycle,
+			MatchesInLastCycle:     matchCount,
+			ParseErrorsInLastCycle: state.ParseErrorsInLastCycle,
+			IsRunning:              true,
+		})
+	}
+	m.state.SetError(ctx, "")
+}
+
+func (m *Monitor) matchEntries(
+	ctx context.Context,
+	entries []ctlog.RawEntry,
+	batchStart int64,
+	keywords []model.Keyword,
+) (matchCount, parseErrors int) {
 	for i, entry := range entries {
 		cert, err := ctlog.ParseLeafInput(entry.LeafInput, entry.ExtraData)
 		if err != nil {
@@ -205,24 +300,16 @@ func (m *Monitor) processBatch(ctx context.Context) {
 				NotAfter:      cert.NotAfter,
 				KeywordID:     match.KeywordID,
 				MatchedDomain: match.MatchedDomain,
-				CTLogIndex:    start + int64(i),
+				CTLogIndex:    batchStart + int64(i),
 			})
 			if err != nil {
-				logger.Error("failed to store match", "error", err, "domain", match.MatchedDomain)
+				slog.Error("failed to store match", "error", err, "domain", match.MatchedDomain)
 				continue
 			}
 			matchCount++
 		}
 	}
-
-	logger.Info("batch processed",
-		"entries", len(entries),
-		"parse_errors", parseErrors,
-		"matches", matchCount,
-	)
-
-	// 7. Update state
-	m.updateState(ctx, state, end, sth.TreeSize, len(entries), matchCount, parseErrors)
+	return
 }
 
 func (m *Monitor) updateState(
