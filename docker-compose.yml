@@ -25,7 +25,7 @@ services:
       - "8080:8080"
     environment:
       DATABASE_URL: postgres://ctmonitor:ctmonitor_dev@db:5432/ct_monitor?sslmode=disable
-      CT_LOG_URL: https://ct.cloudflare.com/logs/nimbus2026/
+      CT_LOG_URL: https://oak.ct.letsencrypt.org/2026h2
       SERVER_PORT: "8080"
       MONITOR_INTERVAL: "60s"
       MONITOR_BATCH_SIZE: "100"

@@ -54,7 +54,7 @@ func main() {
 	}
 
 	ctx := context.Background()
-	client := ctlog.NewClient("https://oak.ct.letsencrypt.org/2026h2")
+	client := ctlog.NewClient("https://ct.cloudflare.com/logs/nimbus2027/")
 
 	// Get current tree size
 	sth, err := client.GetSTH(ctx)
