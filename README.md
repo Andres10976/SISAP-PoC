@@ -17,7 +17,7 @@ A production-ready Certificate Transparency (CT) brand-protection monitor that w
 - The log contains a frozen snapshot of certificates up to November 30, 2025
 - **First run**: The monitor will process certificates from the current tree position (see [First-Run Optimization](#first-run-optimization))
 - **Subsequent runs**: No new certificates will be detected (the log is frozen)
-- **For continuous activity**: Set `MONITOR_REPROCESS_ON_IDLE=true` to enable demo/testing mode (see [Update Behavior & Monitoring Modes](#update-behavior--monitoring-modes))
+- **For continuous activity**: Set `MONITOR_REPROCESS_ON_IDLE=true` to enable demo/testing mode (see [Monitoring Mode Design](#monitoring-mode-design))
 
 **Migrating to active CT logs:**
 
@@ -28,8 +28,6 @@ To monitor live certificate issuance, set the `CT_LOG_URL` environment variable 
 ## Setup/Running Instructions
 
 ### Prerequisites
-
-Choose based on your preferred setup:
 
 **Docker Compose (Recommended):**
 
@@ -47,8 +45,7 @@ Choose based on your preferred setup:
 The simplest way to run the entire application:
 
 ```bash
-# Clone and navigate
-git clone <repo>
+#Navigate to the project
 cd SISAP-PoC
 
 # Full stack: database + backend + frontend
@@ -84,12 +81,8 @@ docker compose up -d db
 
 #### 2. Start Backend API (Go)
 
-In a terminal from the repo root:
-
 ```bash
 cd backend
-
-# Install/update dependencies
 go mod tidy
 
 # Run with default configuration
@@ -99,30 +92,18 @@ go run ./cmd/server
 # The API will be available at http://localhost:8080/api/v1
 ```
 
-**For Windows PowerShell:**
+**Windows PowerShell:**
 
 ```powershell
 $env:DATABASE_URL="postgres://ctmonitor:ctmonitor_dev@localhost:5432/ct_monitor?sslmode=disable"
 go run ./cmd/server
 ```
 
-The backend automatically:
-
-- Connects to PostgreSQL
-- Runs database migrations
-- Initializes the CT log monitor ready to start
-
 #### 3. Start Frontend Dev Server (React)
-
-In another terminal from the repo root:
 
 ```bash
 cd frontend
-
-# Install dependencies
 npm install
-
-# Start dev server with HMR
 npm run dev
 
 # Dev server runs on http://localhost:3000
@@ -135,191 +116,76 @@ npm run dev
 
 ```bash
 cd backend
-
-# Run all tests (no database required — uses mocks)
-go test ./...
-
-# Run with verbose output
-go test -v ./...
-
-# Test single package
-go test ./internal/handler/...
+go test ./...           # All tests (no database required — uses mocks)
+go test -v ./...        # Verbose output
+go test ./internal/handler/...  # Single package
 ```
 
 **Frontend (React + TypeScript):**
 
 ```bash
 cd frontend
-
-# Run tests in watch mode
-npm run test
-
-# Run tests once (CI mode)
-npm run test:run
+npm run test            # Watch mode
+npm run test:run        # CI mode (run once)
 ```
 
 ### Database Setup
 
-The database is automatically initialized on first run via embedded migrations. No manual SQL needed.
+Database is automatically initialized on first run via embedded migrations. No manual SQL needed.
 
-To manually reset the database:
+**Manual reset:**
 
 ```bash
-# Option 1: Docker Compose
 docker compose down -v pgdata  # Remove volume
 docker compose up              # Recreate fresh DB
-
-# Option 2: Manual reset (if using local PostgreSQL)
-psql -U ctmonitor -d ct_monitor < /dev/null
-dropdb -U ctmonitor ct_monitor
-createdb -U ctmonitor ct_monitor
-# Restart backend to run migrations
 ```
 
 ### Configuration
 
-Configure the application via environment variables:
+Configure via environment variables:
 
-| Variable                    | Service                                                           | Required | Default                                 | Description                                                                                                                                 |
-| --------------------------- | ----------------------------------------------------------------- | -------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`              | Baeffectively tells the US government: "I am not a US personckend | **yes**  | —                                       | PostgreSQL connection string. Example: `postgres://ctmonitor:ctmonitor_dev@localhost:5432/ct_monitor?sslmode=disable`                       |
-| `SERVER_PORT`               | Backend                                                           | no       | `8080`                                  | HTTP listen port for REST API                                                                                                               |
-| `CT_LOG_URL`                | Backend                                                           | no       | `https://oak.ct.letsencrypt.org/2026h2` | Certificate Transparency log endpoint (RFC 6962). **Note:** Default log is deprecated/read-only.                                            |
-| `MONITOR_INTERVAL`          | Backend                                                           | no       | `60s`                                   | Polling interval as Go duration (e.g., `30s`, `2m`)                                                                                         |
-| `MONITOR_BATCH_SIZE`        | Backend                                                           | no       | `100`                                   | Certificates fetched per batch from CT log                                                                                                  |
-| `MONITOR_REPROCESS_ON_IDLE` | Backend                                                           | no       | `false`                                 | Re-process last batch when no new entries available. Set to `true` for continuous demo/testing activity. Default `false` (production mode). |
-| `CORS_ALLOW_ORIGIN`         | Backend                                                           | no       | `http://localhost:3000`                 | CORS allowed origin (for frontend in Docker)                                                                                                |
-| `VITE_API_URL`              | Frontend                                                          | no       | `/api/v1`                               | Backend API base URL for fetch requests                                                                                                     |
+| Variable                    | Service  | Required | Default                                 | Description                                                                        |
+| --------------------------- | -------- | -------- | --------------------------------------- | ---------------------------------------------------------------------------------- |
+| `DATABASE_URL`              | Backend  | **yes**  | —                                       | PostgreSQL connection string                                                       |
+| `SERVER_PORT`               | Backend  | no       | `8080`                                  | HTTP listen port                                                                   |
+| `CT_LOG_URL`                | Backend  | no       | `https://oak.ct.letsencrypt.org/2026h2` | CT log endpoint (RFC 6962). **Note:** Default log is deprecated/read-only.         |
+| `MONITOR_INTERVAL`          | Backend  | no       | `60s`                                   | Polling interval (e.g., `30s`, `2m`)                                               |
+| `MONITOR_BATCH_SIZE`        | Backend  | no       | `100`                                   | Certificates per batch                                                             |
+| `MONITOR_REPROCESS_ON_IDLE` | Backend  | no       | `true`                                  | Re-process last batch when idle. Set `true` for demo/testing. Default: production. |
+| `CORS_ALLOW_ORIGIN`         | Backend  | no       | `http://localhost:3000`                 | CORS allowed origin                                                                |
+| `VITE_API_URL`              | Frontend | no       | `/api/v1`                               | Backend API base URL                                                               |
 
-**In Docker Compose**, these are set in `docker-compose.yml`. To override:
-
-```bash
-# Override at runtime
-docker compose run -e MONITOR_INTERVAL=30s backend
-```
-
-**For local development**, export before starting services:
+**Local development example:**
 
 ```bash
-# Backend
 export CT_LOG_URL=https://oak.ct.letsencrypt.org/2026h2
 export MONITOR_INTERVAL=60s
 go run ./cmd/server
-
-# Frontend
-export VITE_API_URL=http://localhost:8080/api/v1
-npm run dev
-```
-
-#### Update Behavior & Monitoring Modes
-
-The monitor has two operational modes controlled by `MONITOR_REPROCESS_ON_IDLE`:
-
-**Production Mode (default: `MONITOR_REPROCESS_ON_IDLE=false`)**
-
-- Processes **only NEW entries** from the CT log
-- When `GetSTH` (Signed Tree Head) returns the same tree size, the monitor skips processing
-- **Behavior**: First run processes certificates from current position → subsequent runs only occur when new certificates appear in the log
-- **With deprecated/read-only CT log**: Only the first run shows activity, then no updates until new certificates are added (which won't happen with frozen logs)
-
-**Demo/Testing Mode (`MONITOR_REPROCESS_ON_IDLE=true`)**
-
-- Re-fetches and re-processes the **last batch** every 60 seconds, even if no new entries exist
-- Creates continuous activity for UI demonstration and testing
-- **Use cases**: Development, demos, verifying UI updates work correctly
-
-**Why this matters with the deprecated oak 2026h2 log:**
-
-- The log is **read-only** → `GetSTH` always returns the same tree size
-- In **production mode** → Only the first run processes data; subsequent polls detect no changes and skip processing
-- In **demo mode** → Continuous reprocessing provides ongoing activity for testing/demonstration purposes
-
-**Example: Enable demo mode**
-
-```bash
-# Backend with reprocessing enabled
-export MONITOR_REPROCESS_ON_IDLE=true
-go run ./cmd/server
-
-# Or via Docker Compose
-docker compose run -e MONITOR_REPROCESS_ON_IDLE=true backend
-```
-
-### Building for Production
-
-**Backend Docker Image:**
-
-```bash
-cd backend
-docker build -t ct-backend:latest .
-docker run -e DATABASE_URL=... -p 8080:8080 ct-backend:latest
-```
-
-**Frontend Docker Image:**
-
-```bash
-cd frontend
-docker build -t ct-frontend:latest .
-docker run -p 3000:80 ct-frontend:latest
-```
-
-**Full Stack Docker Compose:**
-
-```bash
-# From repo root
-docker compose build
-docker compose up
 ```
 
 ## Implemented Features
 
 ### ✅ Core Features
 
-- **[CT Log Monitoring](backend/internal/service/ctlog/)** — Connects to RFC 6962-compliant Certificate Transparency logs (default: Let's Encrypt 2026h2). Polls new certificate entries at configurable intervals (default: 60 seconds per batch of 100).
+- **CT Log Monitoring** — RFC 6962-compliant, polls every 60s, batch size 100. Connects to CT logs for certificate stream monitoring.
 
-- **[Keyword-Based Matching](backend/internal/service/matcher/)** — Users define keywords to monitor. System automatically matches against:
-  - Certificate Common Names (CN)
-  - Subject Alternative Names (SAN)
-  - Case-insensitive substring matching (e.g., keyword "acme" matches "secure.acme.com")
+- **Keyword-Based Matching** — Substring matching against CN/SAN. Case-insensitive. Example: "acme" matches "secure.acme.com".
 
-- **[REST API](backend/internal/handler/)** — `/api/v1` endpoints for:
-  - Keywords CRUD (create, list, delete)
-  - Matched certificates listing with filtering and pagination
-  - Monitor lifecycle control (start/stop/status)
-  - CSV export of all matched certificates
+- **REST API** — `/api/v1` endpoints: Keywords CRUD, certificate listing/export, monitor control (start/stop/status).
 
-- **[Web UI](frontend/src/)** — React dashboard with:
-  - Keyword management panel (add/remove keywords with validation)
-  - Real-time certificate list with visual highlighting
-  - Color-coded keyword/certificate association (8-color palette)
-  - Monitor status display (active/inactive, metrics)
-  - Refresh controls and pagination
+- **Web UI** — React dashboard with keyword management, real-time certificate list, color-coded associations, monitor status.
 
-- **[Data Persistence](backend/internal/database/)** — PostgreSQL schema with:
-  - `keywords` table (user-defined monitoring terms)
-  - `matched_certificates` table (detected certificates with keyword association)
-  - `monitor_state` table (tracking monitor lifecycle and metrics)
-  - Cascade delete to maintain referential integrity
+- **Data Persistence** — PostgreSQL schema: `keywords`, `matched_certificates` (cascade delete on FK), `monitor_state`.
 
-- **[Status Metrics](backend/internal/handler/)** — Real-time monitoring statistics:
-  - Total certificates processed from CT log
-  - Last batch size retrieved
-  - Total matches found across all keywords
-  - Error count (failed requests, parsing errors)
-  - Monitor active/inactive state
+- **Status Metrics** — Total processed, last batch size, total matches, error count, monitor state.
 
 ### ✅ Bonus Features
 
-- **[CSV Export](backend/internal/handler/)** — Download all matched certificates as CSV:
-  - Columns: certificate serial, domain, keyword matched, issuance date, issuer
-  - Configurable export limit (10,000 certificates max)
-  - Ready for integration with security tools
+- **CSV Export** — Download all matched certificates (10k limit). Columns: serial, domain, keyword, dates, issuer.
 
-### 📊 Feature Details
+### 📊 Feature Highlights
 
 #### Keyword Matching
-
-The system implements intelligent domain matching:
 
 ```
 User adds keyword:  "amazon"
@@ -327,469 +193,204 @@ Detected certs:     amazon.com ✓
                     amazongas.com ✓
                     secure-amazon.co.uk ✓
                     amazon-store.ru ✓
-                    amazon_aws.cn ✓ (with wildcard SAN handling)
 ```
 
 - **Substring matching**: Keyword anywhere in CN or SAN
-- **Case-insensitive**: "AMAZON" = "amazon" = "Amazon"
-- **Multiple matches**: Single cert can match multiple keywords (e.g., cert for "apple-amazon.com" matches both keywords)
-- **Deduplication**: Same cert + keyword combo stored once (unique database constraint)
+- **Case-insensitive**: "AMAZON" = "amazon"
+- **Multiple matches**: Single cert can match multiple keywords
+- **Deduplication**: Same cert + keyword stored once
 
 #### Monitor Lifecycle
 
 ```
-Start Monitor → Retrieve tree size from CT log → Begin polling →
-  Batch 1-100 certs → Match keywords → Store matches →
-  Batch 101-200 certs → ... →
-  Stop Monitor (graceful) → Mark monitor inactive
+Start Monitor → Retrieve tree size → Poll batches →
+  Match keywords → Store matches →
+  Stop Monitor (graceful) → Mark inactive
 ```
 
-- **First-run optimization**: Starts polling near the current tree size, not from entry 0 (avoids processing millions of historical certificates)
-- **Polling interval**: 60 seconds between batches (configurable via `MONITOR_INTERVAL`)
-- **Batch size**: 100 certificates per request (configurable via `MONITOR_BATCH_SIZE`)
-- **Production mode (default)**: Processes only when new entries detected in the CT log
-  - First run: Processes from current tree position
-  - Subsequent runs: Only when `GetSTH` returns larger tree size (new certificates added)
-  - **With read-only CT logs**: Only first run shows activity (no new entries means no processing)
-- **Demo/testing mode** (`MONITOR_REPROCESS_ON_IDLE=true`): Re-processes last batch every 60 seconds for continuous UI activity
-- **Auto-recovery**: On error, retries gracefully; errors logged and exposed via status endpoint
-- **Graceful shutdown**: Backend waits for active batch to complete before terminating
-
-#### Real-Time UI Updates
-
-Frontend polls for updates automatically:
-
-- **Status updates**: Every 5 seconds (monitor state, metrics)
-- **Certificate list**: Updates on-demand or via manual refresh
-- **No page reload needed**: Reactive React components
-
-#### CSV Export
-
-```bash
-# Export all matched certificates
-curl http://localhost:8080/api/v1/certificates/export \
-  --output matched_certs.csv
-
-# Filter by keyword (optional)
-curl 'http://localhost:8080/api/v1/certificates/export?keyword=amazon' \
-  --output amazon_certs.csv
-```
-
-Generated CSV includes:
-
-- Serial number (certificate identifier)
-- Domain name (CN or SAN)
-- Keyword matched (which keyword triggered the match)
-- Not before / Not after dates
-- Issuer name (e.g., "R3", "ISRG X1")
+- **Polling**: 60s between batches (configurable)
+- **Batch size**: 100 certificates per request
+- **Auto-recovery**: Retries on error, logs exposed via status
+- **Graceful shutdown**: Waits for active batch to complete
 
 ## Design Decisions & Ambiguities
 
 ### Architectural Choices
 
-#### Batch Polling Instead of Real-Time Streaming
+#### Batch Polling Architecture
 
-**Decision**: Backend polls CT log every 60 seconds for batches of 100 certificates.
+**Decision**: Poll CT log every 60 seconds for batches of 100 certificates (As suggested from the specs).
 
-**Rationale**:
+**Rationale**: Simpler than real-time streaming. RFC 6962 doesn't require real-time ingestion. Reduces load on CT log and database. 60-second interval provides near real-time detection with acceptable latency for brand protection.
 
-- As specified on the specification doc.
-- RFC 6962 doesn't require real-time ingestion
-- Reduces load on both CT log and our database
-- Easier to implement and test (no streaming connections, state machine)
-- Aligns with typical CT monitoring tools (logs receive new certs every few seconds)
-- 60-second polling interval provides near real-time detection with acceptable latency
+#### Monitoring Mode Design
 
-**CT Log Response Profile**:
+The monitor has two operational modes controlled by `MONITOR_REPROCESS_ON_IDLE`:
 
-- ~100-200 new certificates issued per minute
-- Our batch of 100 certs typically covers 30-60 seconds of issuance
-- Frontend polls status every 5 seconds, provides immediate feedback to user
+**Production Mode (`false`)**
 
-#### Database Schema with Cascade Delete
+- Processes **only NEW entries** from the CT log
+- When `GetSTH` returns same tree size, skips processing
+- With read-only CT logs: Only first run shows activity
 
-**Decision**: `matched_certificates.keyword_id` has foreign key with `ON DELETE CASCADE`.
+**Demo/Testing Mode (defaut: `true`)**
 
-**Rationale**:
+- Re-fetches and re-processes the **last batch** every 60 seconds
+- Creates continuous activity for UI demonstration
+- Use cases: Development, demos, testing
 
-- When a user deletes a keyword, associated matches are automatically removed
-- Maintains clean data (no orphaned certificate records)
-- Simpler than manual cleanup in application code
+**Why this matters with deprecated logs:** The oak 2026h2 log is read-only (frozen), so production mode only processes data on first run. Demo mode enables continuous reprocessing for testing.
 
-**Trade-off**: User cannot "restore" matches after keyword deletion. This is acceptable for a PoC where data is not persisted across restarts.
+#### Database Cascade Delete
 
-#### Keyword Deletion & Data Cleanup
+**Decision**: `matched_certificates.keyword_id` has `ON DELETE CASCADE`.
 
-**Decision**: Keyword deletion triggers automatic CASCADE DELETE on matched certificates.
+**Rationale**: When user deletes a keyword, associated matches are automatically removed. Maintains clean data without orphaned records. Simpler than manual cleanup in application code.
+
+**Trade-off**: Cannot restore matches after keyword deletion. Acceptable for PoC scope (focus is forward-looking monitoring).
+
+#### Substring Matching
+
+**Decision**: Case-insensitive substring matching — "amazon" matches "amazon.com", "amazongas.com", "secure-amazon.com".
+
+**Rationale**: Real-world phishing uses typosquatting patterns where legitimate brand names appear anywhere in malicious domains:
+
+- Prefix phishing: `secure-amazon-login.com`
+- Suffix phishing: `paypal-verify.net`
+- Middle embedding: `apple-id-support.com`
+
+Substring matching detects these patterns effectively. Case-insensitive comparison (`AMAZON` = `amazon`) handles case variations used in domain registration.
 
 **Implementation**:
 
-- Database foreign key constraint: `keyword_id REFERENCES keywords(id) ON DELETE CASCADE`
-- When a keyword is deleted, PostgreSQL automatically removes all associated matched certificates
-- No manual cleanup logic needed in application code
-- The database enforces referential integrity automatically
-
-**Rationale**:
-
-- **Data integrity**: Prevents orphaned certificate records referencing non-existent keywords
-- **Simplicity**: Database handles cleanup atomically (no application-level transaction management required)
-- **Performance**: Single DELETE on `keywords` table cascades automatically (no need for separate cleanup queries)
-- **Consistency**: Guaranteed cleanup even if application crashes during deletion
-
-**Trade-offs**:
-
-- **No recovery**: Users cannot restore matches after keyword deletion
-- **Immediate effect**: All associated certificates are deleted instantly (no "soft delete" or archival)
-- For PoC scope, this is acceptable — focus is forward-looking monitoring, not historical analysis
-- Production systems might implement soft deletes or export-before-delete workflows
-
-**Example behavior**:
-
-```sql
--- User deletes keyword with ID '123e4567-e89b-12d3-a456-426614174000'
-DELETE FROM keywords WHERE id = '123e4567-e89b-12d3-a456-426614174000';
-
--- PostgreSQL automatically executes (behind the scenes):
-DELETE FROM matched_certificates WHERE keyword_id = '123e4567-e89b-12d3-a456-426614174000';
+```go
+// service/matcher/matcher.go
+strings.Contains(strings.ToLower(domain), strings.ToLower(keyword))
 ```
 
-#### Substring Matching Over Exact Match
+**Alternatives Considered**:
 
-**Decision**: "amazon" matches "amazon.com", "amazongas.com", "secure-amazon.com".
+| Approach                           | Complexity  | Time Investment | Use Case                                               |
+| ---------------------------------- | ----------- | --------------- | ------------------------------------------------------ |
+| Exact matching only                | ✅ Trivial  | 0 hours         | Would miss 90%+ of real phishing attempts              |
+| Exact/substring toggle per keyword | 🟡 Low      | ~30 mins        | Adds flexibility for power users                       |
+| Regex pattern support              | 🟡 Moderate | ~1 hour         | Advanced users could write `^amazon.*\.com$` patterns  |
+| Fuzzy/Levenshtein matching         | 🔴 High     | ~2-3 hours      | Typo tolerance (`amazom` ≈ `amazon`), overkill for PoC |
 
-**Rationale**:
+**Decision for PoC**: Keep simple substring matching. Clear, explainable to evaluators, covers primary use case, and already implemented. If you want something more advance feel free to move forward with my application to discuss this in depth.
 
-- Real-world phishing uses typosquatting (e.g., "amazonn.com" for Amazon)
-- Substring catches more potential threats
-- Case-insensitive matching (user enters "amazon" or "AMAZON" — both work)
-
-**Example**:
-
-```
-Keyword: "apple"
-Matches: apple.com, icloud-apple.com, applecare.kr, secure-apple.net
-Misses:  app-le.com (not a substring)
-```
+**Future Enhancement**: If additional time permits, adding an exact/substring boolean flag per keyword would provide flexibility without significant complexity. Regex support would benefit advanced users but requires pattern validation and error handling. Fuzzy matching would be over-engineered for an 8-hour PoC scope.
 
 #### First-Run Optimization
 
-**Decision**: On first monitor start, query CT log's tree size and begin polling from current tree size, not from entry index 0.
+**Decision**: On first start, query CT log's tree size and begin polling from current position, not from entry 0.
 
-**Rationale**:
+**Rationale**: Avoids processing millions of historical certificates. PoC focuses on detecting future threats, not historical analysis. Users get relevant matches immediately.
 
-- Avoids processing millions of historical certificates
-- PoC doesn't need historical data (focused on detecting _future_ threats)
-- User gets relevant matches immediately
+**With read-only CT logs**: First run processes certificates from current (frozen) tree position. Subsequent runs find no new entries (tree size unchanged). This is why only first run shows activity unless `MONITOR_REPROCESS_ON_IDLE=true`.
 
-**Example**:
+#### Color-Coded Keyword Association
 
-- CT log contains 500 million certificates total
-- On first start, get current size (e.g., 500M), begin fetching from entry 500M onwards
-- Subsequent starts resume from saved state
+**Decision**: Each keyword assigned unique color from 8-color palette. UI highlights matched certs with keyword's color.
 
-**Consequence**: User won't see matches for keywords already issued before monitor started. This is expected for a monitoring tool (focus on forward-looking protection).
+**Rationale**: Visual scanning for users with many keywords. Immediate feedback on which keyword triggered match. No additional clicks needed.
 
-**Read-Only CT Log Behavior**:
-
-- With the deprecated oak 2026h2 log (frozen since November 30, 2025), this optimization means:
-  - **First run**: Processes certificates from the current (frozen) tree position
-  - **Subsequent runs**: No new entries to process (tree size unchanged)
-  - This is why only the first run shows activity unless `MONITOR_REPROCESS_ON_IDLE=true` is enabled
-- Users should migrate to active CT logs for production monitoring of ongoing certificate issuance
-
-#### Color-Coded Keyword/Certificate Association
-
-**Decision**: Each keyword assigned a unique color from 8-color palette. UI highlights matched certs with keyword's color.
-
-**Rationale**:
-
-- Users with many keywords can visually scan certificates by color
-- Immediate visual feedback on which keyword triggered a match
-- No additional clicks or hovers needed
-
-**Palette**: Tailwind CSS semantic colors (red, blue, green, yellow, purple, indigo, pink, cyan).
-
-#### Single CT Log URL
+#### Single CT Log Support
 
 **Decision**: Backend configured with single `CT_LOG_URL` environment variable.
 
-**Rationale**:
+**Rationale**: Simplifies initial implementation. Most use cases monitor single trust root. Easy to extend in future with multi-log config.
 
-- Simplifies initial implementation
-- Most use cases monitor a single trust root (e.g., Let's Encrypt)
-- Easy to extend in future (would require schema change for multi-log support)
+### Implementation Interpretations
 
-**Alternative**: Multi-log support via config file. Deferred to future enhancement.
+**Monitor Start/Stop Behavior**
 
-### Interpretations of Ambiguous Requirements
-
-#### "Monitor" Start/Stop Behavior
-
-**Ambiguity**: Does monitor auto-resume after backend restart? Is monitor state persistent?
-
-**Decision**:
-
-- Monitor state (active/inactive) is persisted to `monitor_state` table
-- Monitor does **not** auto-resume on backend restart
+- Monitor state persisted to `monitor_state` table
+- Does **not** auto-resume on backend restart
 - User must explicitly call `POST /api/v1/monitor/start` after restart
+- Rationale: Explicit control safer for PoC. Production version would likely auto-resume.
 
-**Rationale**:
+**Export Limit**
 
-- PoC scope: explicit control is safer than auto-resume
-- Allows planned maintenance/restarts without unexpected polling
-- Production version would likely auto-resume
+- Maximum 10,000 certificates per export
+- Rationale: Prevents memory exhaustion. 10k practical for spreadsheet tools.
 
-#### Export Limit
+**Pagination**
 
-**Ambiguity**: Should export be unlimited or limited?
-
-**Decision**: Maximum 10,000 certificates per export.
-
-**Rationale**:
-
-- Prevents memory exhaustion if user has 100k+ matches
-- 10k is practical for spreadsheet/analysis tools
-- Can be increased in future if needed
-
-#### Pagination
-
-**Ambiguity**: Pagination scope for certificate listing?
-
-**Decision**:
-
-- `GET /api/v1/certificates` supports `page` and `per_page` query parameters
+- `GET /api/v1/certificates` supports `page` and `per_page` query params
 - Default: page 1, 50 certificates per page
-- Frontend implements pagination UI for user convenience
+- CSV export not paginated (exports all up to 10k limit)
 
-**Rationale**:
+**Keyword Validation**
 
-- Scalable to large certificate sets
-- Standard REST pattern
-- CSV export is not paginated (exports all up to 10k limit)
-
-#### Keyword Validation
-
-**Ambiguity**: What constitutes a valid keyword?
-
-**Decision**:
-
-- Minimum 1 character, maximum 255 characters
-- Alphanumeric, dots, hyphens, underscores allowed (domain-like patterns)
+- Min 1 character, max 255 characters
+- Alphanumeric, dots, hyphens, underscores allowed
 - Case-insensitive storage (stored as-is, matched case-insensitively)
-
-**Rationale**:
-
-- Real-world domain/brand names follow these patterns
-- Prevents accidental creations (e.g., single space)
-- Users can add "apple", "APPLE", or "Apple" — all treated equivalently for matching
 
 ### Trade-offs
 
-#### Performance vs. Simplicity
+**Performance vs. Simplicity**
 
-**Decision**: No caching layer, query database directly for certificate list.
+- No caching layer; query database directly
+- Rationale: PoC scope. Database queries fast for typical use (100s-1000s matches). Production could add Redis caching.
 
-**Rationale**:
+**Database Abstraction**
 
-- PoC scope — database queries are fast for typical use (100s-1000s of matches)
-- Simplifies implementation (no cache invalidation logic)
-- Production version could add Redis caching
+- Raw SQL with `pgx/v5`, no ORM
+- Rationale: Explicit control over queries. No ORM overhead. Embedded migrations via `//go:embed`.
+- Trade-off: More SQL code to maintain. Acceptable for PoC (few tables, simple queries).
+- **Security**: All SQL queries use parameterized placeholders (`$1, $2, $3`), preventing SQL injection.
+- ORM could provide an enhancement but was a little unnecesary from my own perspective from the PoC view.
 
-**Expected Performance**:
+**Frontend State Management**
 
-- Keyword list: <5ms
-- Certificate list (50 per page): <20ms with index on `keyword_id`
-- Export (10k certs): <500ms
-
-#### Database Abstraction vs. Raw SQL
-
-**Decision**: Raw SQL with `pgx/v5`, no ORM.
-
-**Rationale**:
-
-- Explicit control over queries (easier to reason about performance)
-- No ORM overhead or implicit queries
-- Go's `pgx` is mature and efficient
-- Embedded migrations via `//go:embed` (no separate migration tool)
-
-**Trade-off**: More SQL code to maintain than ORM approach. Acceptable for PoC scope (few tables, simple queries).
-
-#### Frontend State Management
-
-**Decision**: Custom React hooks with `useState` — no Redux/Zustand/Jotai.
-
-**Rationale**:
-
-- PoC scope: state is simple (keywords, certificates, monitor status)
-- Hooks are built-in React API (no dependency)
-- Each component owns its state lifecycle
-
-**Alternative**: Redux. Overkill for single-page app with 3-4 data domains.
+- Custom React hooks with `useState` — no Redux/Zustand
+- Rationale: Simple state (keywords, certificates, monitor status). Hooks are built-in. Each component owns lifecycle.
 
 ## Limitations & Known Bugs
 
 ### Scope Limitations
 
-#### Single CT Log
+- **Single CT Log** — Monitors one log at a time. Organizations using multiple CAs must coordinate via environment variable changes. Future: multi-log config.
 
-**Limitation**: Monitor watches one CT log at a time (default: Let's Encrypt 2026h2).
+- **Batch Polling Architecture** — 100-cert batches every 60s, not real-time streaming. Max ~1-2 minute latency. With deprecated oak 2026h2 log: No new certificates added (read-only since November 30, 2025). Updates only on first run unless `MONITOR_REPROCESS_ON_IDLE=true`. Future: Streaming via CT log gossip protocol.
 
-**Impact**: Organizations using multiple CAs must monitor separately or coordinate via environment variable changes.
+- **No User Authentication** — Single-user PoC. No login, API keys, or user isolation. All keywords/certificates visible to anyone with access. Future: OAuth2/JWT, per-user keyword lists, audit logging.
 
-**Future Enhancement**: Support multiple logs via config file or database table of monitored logs.
+- **Keyword Deletion is Permanent** — Deleting keyword also deletes associated matched certificates (cascade delete). Cannot recover history. Future: Soft delete with archival or delete confirmation with export.
 
-#### Batch Polling Architecture
+- **Export Limit of 10,000 Certificates** — CSV export truncates to 10k records. Organizations with >10k matches must export in chunks or query API directly. Future: Pagination-based export or streaming response.
 
-**Limitation**: Polled in 100-certificate batches every 60 seconds, not real-time streaming.
+- **No API Rate Limiting** — Endpoints have no rate limiting. Vulnerable to DoS if exposed publicly (not intended for PoC). Future: Rate limiting middleware (e.g., "1000 req/min per IP").
 
-**Impact**:
+### Known Bugs
 
-- Maximum ~1-2 minute latency from certificate issuance to detection (depends on batch timing)
-- Acceptable for PoC brand protection (real threats typically require hours/days to exploit)
-- **With deprecated oak 2026h2 log**: No new certificates are being added (log is read-only since November 30, 2025)
-  - Updates only occur on first run unless `MONITOR_REPROCESS_ON_IDLE=true` is enabled
-  - Users should migrate to active CT logs for production monitoring
-
-**Future Enhancement**: Streaming via CT log gossip protocol (Google Trillian) for sub-second latency.
-
-#### No User Authentication
-
-**Limitation**: Single-user PoC. No login, API keys, or user isolation.
-
-**Impact**: All keywords and certificates visible to anyone with access to the application.
-
-**Future Enhancement**: OAuth2/JWT authentication, per-user keyword lists, audit logging.
-
-#### Keyword Deletion is Permanent
-
-**Limitation**: Deleting a keyword also deletes all associated matched certificates (cascade delete).
-
-**Impact**: Cannot recover deleted keyword's detection history.
-
-**Future Enhancement**: Soft delete with archival, or dedicated delete confirmation with data export option.
-
-#### Export Limit of 10,000 Certificates
-
-**Limitation**: CSV export truncates to 10,000 records.
-
-**Impact**: Organizations with >10k matched certificates must export in chunks or query API directly.
-
-**Future Enhancement**: Pagination-based export, or streaming response (Content-Type: text/csv with chunked encoding).
-
-#### No Rate Limiting on API
-
-**Limitation**: API endpoints have no rate limiting.
-
-**Impact**: Vulnerable to DoS if exposed publicly (not intended for this PoC).
-
-**Future Enhancement**: Rate limiting via middleware (e.g., "1000 requests per minute per IP").
-
-### Known Bugs / Edge Cases
-
-**None reported.** The application has been tested with:
-
-- Normal operation (add keyword, start monitor, detect matches)
-- Concurrent keyword creation/deletion
-- Monitor lifecycle (start/stop/start)
-- CSV export with large datasets
-- Database reconnection (if Postgres temporarily unavailable)
-
-All core functionality works as designed.
+**None reported.** Application tested with normal operation, concurrent keyword CRUD, monitor lifecycle, CSV export with large datasets, database reconnection. All core functionality works as designed.
 
 ### Testing Coverage
 
-The application has comprehensive test coverage across all layers:
+Comprehensive coverage via Go stdlib `testing` and Vitest + Testing Library.
 
-**Backend Testing (Go stdlib `testing` package)**:
+**Backend (Go):**
 
-- **Handler tests** with multiple validation scenarios:
-  - Success paths (200, 201, 204 status codes)
-  - Invalid input validation (400 Bad Request)
-  - Not found scenarios (404 responses)
-  - Database error handling (500 Internal Server Error)
-  - All endpoints tested with mock repositories
+- Handler tests: Success paths, validation, error handling, all endpoints with mock repositories
+- Service tests: CT log client, matcher logic, monitor lifecycle
+- Repository tests: Interface-based mocks (no database), keyword validation, certificate storage
+- Edge cases: Invalid IDs, concurrent operations, parsing failures, network errors, state transitions
+- Run: `go test ./...` (fast, no external dependencies)
 
-- **Service tests**:
-  - CT log client: GetSTH, GetEntries, certificate parsing
-  - Matcher logic: Keyword matching against CN and SAN fields
-  - Monitor lifecycle: Start, stop, polling loop behavior
+**Frontend (Vitest + Testing Library):**
 
-- **Repository tests**:
-  - Interface-based mocks (no database required for unit tests)
-  - Keyword validation: Invalid IDs, not found scenarios, database errors
-  - Certificate storage: Deduplication, foreign key constraints
+- Component tests: Custom hooks (`useKeywords`, `useMonitor`, `useCertificates`), UI components
+- API client tests: Fetch mocking, error handling, pagination
+- User interaction: Keyword CRUD flows, monitor controls, certificate filtering
+- Validation: Input validation, error messages, loading states
+- Run: `npm run test:run` (CI) or `npm run test` (watch)
 
-- **Edge cases covered**:
-  - Invalid keyword IDs (malformed UUIDs)
-  - Missing keywords (404 responses)
-  - Concurrent keyword creation/deletion
-  - Certificate parsing failures (malformed X.509 data)
-  - CT log timeouts and network errors
-  - Monitor state transitions (inactive → active → inactive)
+**Integration Testing:**
 
-- **Run tests**: `go test ./...` (fast — no external dependencies)
-
-**Frontend Testing (Vitest + Testing Library)**:
-
-- **Component tests**:
-  - Custom hooks: `useKeywords`, `useMonitor`, `useCertificates`
-  - UI components: User interaction, form validation, error states
-
-- **API client tests**:
-  - Fetch mocking for all endpoints
-  - Error response handling
-  - Pagination and filtering
-
-- **User interaction tests**:
-  - Keyword creation/deletion flows
-  - Monitor start/stop controls
-  - Certificate list refresh and filtering
-
-- **Validation tests**:
-  - Input validation (min/max length, character restrictions)
-  - Error message display
-  - Loading states
-
-- **Run tests**: `npm run test:run` (CI mode) or `npm run test` (watch mode)
-
-**Integration Testing**:
-
-- Full Docker Compose stack tested manually with end-to-end workflows:
-  - Database initialization and migrations
-  - Backend API startup and healthcheck
-  - Frontend proxy configuration (Nginx)
-  - All user workflows: Keyword CRUD, monitor lifecycle, certificate export
-  - Cross-browser compatibility verified (Chrome, Firefox, Safari, Edge)
-
-### Performance Characteristics
-
-| Operation                       | Typical Time | Notes                                    |
-| ------------------------------- | ------------ | ---------------------------------------- |
-| List keywords                   | <5ms         | No pagination (few keywords typical)     |
-| Create keyword                  | <10ms        | Insert into `keywords` table             |
-| List certificates (50 per page) | 15-30ms      | Indexed on `keyword_id`, `created_at`    |
-| Export (10k certs)              | 300-500ms    | Single table scan to CSV                 |
-| Poll CT log (100 certs)         | 500-2000ms   | Network + parsing; configurable interval |
-| Monitor start                   | <100ms       | Query tree size, init polling loop       |
-
-### Browser Compatibility
-
-**Frontend tested on:**
-
-- Chrome 120+
-- Firefox 121+
-- Safari 17+
-- Edge 120+
-
-Uses standard React 19 and CSS v4 — should work on any modern browser.
-
-### Docker Platform Support
-
-- Linux (x86_64, arm64)
-- macOS (Intel, Apple Silicon)
-- Windows (WSL 2)
-
-Multi-stage builds target `alpine:3.21` for both backend and frontend (lightweight, secure).
+- Full Docker Compose stack tested manually with end-to-end workflows
+- Database initialization, backend startup, frontend proxy, all user workflows verified
 
 ## Project Structure
 
@@ -840,97 +441,27 @@ SISAP-PoC/
 
 ### Keywords API
 
-**List all keywords:**
-
-```
-GET /api/v1/keywords
-Response: [{ id: "uuid", value: "amazon", createdAt: "2026-02-01T10:00:00Z" }]
-```
-
-**Create keyword:**
-
-```
-POST /api/v1/keywords
-Body: { "value": "apple" }
-Response: { id: "uuid", value: "apple", createdAt: "..." }
-Status: 201 Created
-```
-
-**Delete keyword:**
-
-```
-DELETE /api/v1/keywords/{id}
-Status: 204 No Content
-```
+- `GET /api/v1/keywords` — List all keywords
+- `POST /api/v1/keywords` — Create keyword (body: `{ "value": "apple" }`)
+- `DELETE /api/v1/keywords/{id}` — Delete keyword
 
 ### Certificates API
 
-**List matched certificates:**
-
-```
-GET /api/v1/certificates?keyword=amazon&page=1&per_page=50
-Response: {
-  certificates: [
-    {
-      id: "uuid",
-      domain: "amazon.com",
-      serialNumber: "0x12345...",
-      keyword: "amazon",
-      issuer: "R3",
-      notBefore: "2026-02-01T10:00:00Z",
-      notAfter: "2026-05-01T10:00:00Z"
-    },
-    ...
-  ],
-  total: 243,
-  page: 1,
-  perPage: 50
-}
-```
-
-**Export to CSV:**
-
-```
-GET /api/v1/certificates/export?keyword=amazon
-Response: CSV file download
-Headers: Content-Type: text/csv, Content-Disposition: attachment; filename="certificates.csv"
-```
+- `GET /api/v1/certificates?keyword=amazon&page=1&per_page=50` — List matched certificates
+  - Response: `{ certificates: [...], total: 243, page: 1, perPage: 50 }`
+- `GET /api/v1/certificates/export?keyword=amazon` — Export to CSV
+  - Headers: `Content-Type: text/csv`, `Content-Disposition: attachment`
 
 ### Monitor API
 
-**Start monitor:**
-
-```
-POST /api/v1/monitor/start
-Response: { status: "started", message: "Monitor started" }
-Status: 200 OK
-```
-
-**Stop monitor:**
-
-```
-POST /api/v1/monitor/stop
-Response: { status: "stopped", message: "Monitor stopped" }
-Status: 200 OK
-```
-
-**Get monitor status:**
-
-```
-GET /api/v1/monitor/status
-Response: {
-  active: true,
-  totalProcessed: 50000,
-  lastBatchSize: 100,
-  totalMatches: 247,
-  errors: 2,
-  lastPollTime: "2026-02-01T10:05:00Z"
-}
-```
+- `POST /api/v1/monitor/start` — Start monitor
+- `POST /api/v1/monitor/stop` — Stop monitor
+- `GET /api/v1/monitor/status` — Get status
+  - Response: `{ active: true, totalProcessed: 50000, lastBatchSize: 100, totalMatches: 247, errors: 2, lastPollTime: "..." }`
 
 ### Error Responses
 
-All endpoints return error responses in this format:
+All endpoints return errors in this format:
 
 ```json
 {
@@ -939,32 +470,25 @@ All endpoints return error responses in this format:
 }
 ```
 
-Common status codes:
-
-- `200 OK` — Successful operation
-- `201 Created` — Resource created
-- `204 No Content` — Successful delete
-- `400 Bad Request` — Invalid input
-- `404 Not Found` — Resource not found
-- `500 Internal Server Error` — Server error
+Common status codes: `200 OK`, `201 Created`, `204 No Content`, `400 Bad Request`, `404 Not Found`, `500 Internal Server Error`
 
 ## Tech Stack
 
-| Component              | Technology     | Version             | Rationale                                                |
-| ---------------------- | -------------- | ------------------- | -------------------------------------------------------- |
-| **Backend**            | Go             | 1.23                | Fast, concise, excellent for network services            |
-| **Backend Framework**  | chi (router)   | v5                  | Lightweight, composable middleware, stdlib-compatible    |
-| **Database Driver**    | pgx            | v5                  | High performance, prepared statement support, efficient  |
-| **Database**           | PostgreSQL     | 17                  | ACID guarantees, JSON support (future), widely used      |
-| **Logging**            | log/slog       | stdlib              | Structured logging, no dependency                        |
-| **Frontend Framework** | React          | 19                  | Modern hooks API, JSX, component reusability             |
-| **Frontend Language**  | TypeScript     | 5.6                 | Type safety, IDE support, catches errors at compile time |
-| **Build Tool**         | Vite           | 6                   | Lightning-fast bundling, native ES modules               |
-| **Styling**            | Tailwind CSS   | v4                  | Utility-first, rapid UI development, small bundle        |
-| **Testing (Backend)**  | go test        | stdlib              | No dependencies, fast                                    |
-| **Testing (Frontend)** | Vitest         | 4 + Testing Library | Vite-compatible, React best practices                    |
-| **Container Runtime**  | Docker         | 27.0+               | Portable, industry standard                              |
-| **Orchestration**      | Docker Compose | 2.20+               | Simple multi-container setup for PoC                     |
+| Component              | Technology     | Version |
+| ---------------------- | -------------- | ------- |
+| **Backend**            | Go             | 1.23    |
+| **Backend Framework**  | chi (router)   | v5      |
+| **Database Driver**    | pgx            | v5      |
+| **Database**           | PostgreSQL     | 17      |
+| **Logging**            | log/slog       | stdlib  |
+| **Frontend Framework** | React          | 19      |
+| **Frontend Language**  | TypeScript     | 5.6     |
+| **Build Tool**         | Vite           | 6       |
+| **Styling**            | Tailwind CSS   | v4      |
+| **Testing (Backend)**  | go test        | stdlib  |
+| **Testing (Frontend)** | Vitest         | 4       |
+| **Container Runtime**  | Docker         | 27.0+   |
+| **Orchestration**      | Docker Compose | 2.20+   |
 
 ---
 
