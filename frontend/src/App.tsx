@@ -24,6 +24,16 @@ export default function App() {
     keywordId: filterKeyword,
   });
 
+  const handleAddKeyword = useCallback(async (value: string) => {
+    await keywords.addKeyword(value);
+    certificates.refresh();
+  }, [keywords.addKeyword, certificates.refresh]);
+
+  const handleRemoveKeyword = useCallback(async (id: number) => {
+    await keywords.removeKeyword(id);
+    certificates.refresh();
+  }, [keywords.removeKeyword, certificates.refresh]);
+
   return (
     <Layout>
       <StatusBar
@@ -36,8 +46,8 @@ export default function App() {
         <KeywordPanel
           keywords={keywords.keywords}
           loading={keywords.loading}
-          onAdd={keywords.addKeyword}
-          onRemove={keywords.removeKeyword}
+          onAdd={handleAddKeyword}
+          onRemove={handleRemoveKeyword}
           onFilter={handleFilterChange}
           activeFilter={filterKeyword}
         />
