@@ -659,10 +659,9 @@ SISAP-PoC/
 │   │   └── main.tsx                   # Entry point
 │   ├── package.json                   # npm dependencies
 │   └── index.html                     # SPA entry HTML
-│
-└── db/
-    └── init.sql                       # Database schema seed (optional; migrations in code)
 ```
+
+**Note:** Database schema is managed by the backend via embedded migrations in `backend/internal/database/migrations/`.
 
 ## API Documentation
 

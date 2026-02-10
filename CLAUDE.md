@@ -7,10 +7,11 @@ Monorepo for a Certificate Transparency (CT) brand-protection monitor. Watches a
 ```
 backend/         Go REST API (see backend/CLAUDE.md)
 frontend/        React + TypeScript SPA (see frontend/CLAUDE.md)
-db/              Database seed script (init.sql)
 docs/            Specs and requirements
 docker-compose.yml
 ```
+
+**Note:** Database schema is managed by the backend via embedded migrations in `backend/internal/database/migrations/`. No separate `db/` directory is needed.
 
 ## Quick Start (Local Development — Recommended)
 
