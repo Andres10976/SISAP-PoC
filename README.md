@@ -4,6 +4,34 @@ A production-ready Certificate Transparency (CT) brand-protection monitor that w
 
 **Tech Challenge Submission** — Full-stack TypeScript/Go application with REST API, real-time monitoring, reactive web UI, and PostgreSQL persistence.
 
+## ⚠️ Critical Notice: CT Log Deprecation
+
+**The default CT log (`oak.ct.letsencrypt.org/2026h2`) is deprecated and read-only.**
+
+- **Read-only since**: November 30, 2025
+- **Complete shutdown**: February 28, 2026
+- **Impact**: No new certificates are being added to this log
+
+**What this means for monitoring:**
+- The log contains a frozen snapshot of certificates up to November 30, 2025
+- **First run**: The monitor will process certificates from the current tree position (see [First-Run Optimization](#first-run-optimization))
+- **Subsequent runs**: No new certificates will be detected (the log is frozen)
+- **For continuous activity**: Set `MONITOR_REPROCESS_ON_IDLE=true` to enable demo/testing mode (see [Update Behavior & Monitoring Modes](#update-behavior--monitoring-modes))
+
+**Migrating to active CT logs:**
+
+To monitor live certificate issuance, set the `CT_LOG_URL` environment variable to an active log:
+
+```bash
+# Example: Use Let's Encrypt's 2027 log (when available)
+export CT_LOG_URL=https://oak.ct.letsencrypt.org/2027h1
+
+# Or use another trust anchor's CT log
+# See: https://certificate.transparency.dev/logs/
+```
+
+**Reference**: [Let's Encrypt RFC 6962 CT Logs End of Life](https://letsencrypt.org/2025/08/14/rfc-6962-logs-eol)
+
 ## Setup/Running Instructions
 
 ### Prerequisites
@@ -156,9 +184,10 @@ Configure the application via environment variables:
 |---|---|---|---|---|
 | `DATABASE_URL` | Backend | **yes** | — | PostgreSQL connection string. Example: `postgres://ctmonitor:ctmonitor_dev@localhost:5432/ct_monitor?sslmode=disable` |
 | `SERVER_PORT` | Backend | no | `8080` | HTTP listen port for REST API |
-| `CT_LOG_URL` | Backend | no | `https://oak.ct.letsencrypt.org/2026h2` | Certificate Transparency log endpoint (RFC 6962) |
+| `CT_LOG_URL` | Backend | no | `https://oak.ct.letsencrypt.org/2026h2` | Certificate Transparency log endpoint (RFC 6962). **Note:** Default log is deprecated/read-only. |
 | `MONITOR_INTERVAL` | Backend | no | `60s` | Polling interval as Go duration (e.g., `30s`, `2m`) |
 | `MONITOR_BATCH_SIZE` | Backend | no | `100` | Certificates fetched per batch from CT log |
+| `MONITOR_REPROCESS_ON_IDLE` | Backend | no | `false` | Re-process last batch when no new entries available. Set to `true` for continuous demo/testing activity. Default `false` (production mode). |
 | `CORS_ALLOW_ORIGIN` | Backend | no | `http://localhost:3000` | CORS allowed origin (for frontend in Docker) |
 | `VITE_API_URL` | Frontend | no | `/api/v1` | Backend API base URL for fetch requests |
 
@@ -180,6 +209,40 @@ go run ./cmd/server
 # Frontend
 export VITE_API_URL=http://localhost:8080/api/v1
 npm run dev
+```
+
+#### Update Behavior & Monitoring Modes
+
+The monitor has two operational modes controlled by `MONITOR_REPROCESS_ON_IDLE`:
+
+**Production Mode (default: `MONITOR_REPROCESS_ON_IDLE=false`)**
+
+- Processes **only NEW entries** from the CT log
+- When `GetSTH` (Signed Tree Head) returns the same tree size, the monitor skips processing
+- **Behavior**: First run processes certificates from current position → subsequent runs only occur when new certificates appear in the log
+- **With deprecated/read-only CT log**: Only the first run shows activity, then no updates until new certificates are added (which won't happen with frozen logs)
+
+**Demo/Testing Mode (`MONITOR_REPROCESS_ON_IDLE=true`)**
+
+- Re-fetches and re-processes the **last batch** every 60 seconds, even if no new entries exist
+- Creates continuous activity for UI demonstration and testing
+- **Use cases**: Development, demos, verifying UI updates work correctly
+
+**Why this matters with the deprecated oak 2026h2 log:**
+
+- The log is **read-only** → `GetSTH` always returns the same tree size
+- In **production mode** → Only the first run processes data; subsequent polls detect no changes and skip processing
+- In **demo mode** → Continuous reprocessing provides ongoing activity for testing/demonstration purposes
+
+**Example: Enable demo mode**
+
+```bash
+# Backend with reprocessing enabled
+export MONITOR_REPROCESS_ON_IDLE=true
+go run ./cmd/server
+
+# Or via Docker Compose
+docker compose run -e MONITOR_REPROCESS_ON_IDLE=true backend
 ```
 
 ### Building for Production
@@ -279,8 +342,13 @@ Start Monitor → Retrieve tree size from CT log → Begin polling →
 ```
 
 - **First-run optimization**: Starts polling near the current tree size, not from entry 0 (avoids processing millions of historical certificates)
-- **Polling interval**: 60 seconds between batches (configurable)
-- **Batch size**: 100 certificates per request (configurable)
+- **Polling interval**: 60 seconds between batches (configurable via `MONITOR_INTERVAL`)
+- **Batch size**: 100 certificates per request (configurable via `MONITOR_BATCH_SIZE`)
+- **Production mode (default)**: Processes only when new entries detected in the CT log
+  - First run: Processes from current tree position
+  - Subsequent runs: Only when `GetSTH` returns larger tree size (new certificates added)
+  - **With read-only CT logs**: Only first run shows activity (no new entries means no processing)
+- **Demo/testing mode** (`MONITOR_REPROCESS_ON_IDLE=true`): Re-processes last batch every 60 seconds for continuous UI activity
 - **Auto-recovery**: On error, retries gracefully; errors logged and exposed via status endpoint
 - **Graceful shutdown**: Backend waits for active batch to complete before terminating
 
@@ -359,6 +427,37 @@ Generated CSV includes:
 
 **Trade-off**: User cannot "restore" matches after keyword deletion. This is acceptable for a PoC where data is not persisted across restarts.
 
+#### Keyword Deletion & Data Cleanup
+
+**Decision**: Keyword deletion triggers automatic CASCADE DELETE on matched certificates.
+
+**Implementation**:
+- Database foreign key constraint: `keyword_id REFERENCES keywords(id) ON DELETE CASCADE`
+- When a keyword is deleted, PostgreSQL automatically removes all associated matched certificates
+- No manual cleanup logic needed in application code
+- The database enforces referential integrity automatically
+
+**Rationale**:
+- **Data integrity**: Prevents orphaned certificate records referencing non-existent keywords
+- **Simplicity**: Database handles cleanup atomically (no application-level transaction management required)
+- **Performance**: Single DELETE on `keywords` table cascades automatically (no need for separate cleanup queries)
+- **Consistency**: Guaranteed cleanup even if application crashes during deletion
+
+**Trade-offs**:
+- **No recovery**: Users cannot restore matches after keyword deletion
+- **Immediate effect**: All associated certificates are deleted instantly (no "soft delete" or archival)
+- For PoC scope, this is acceptable — focus is forward-looking monitoring, not historical analysis
+- Production systems might implement soft deletes or export-before-delete workflows
+
+**Example behavior**:
+```sql
+-- User deletes keyword with ID '123e4567-e89b-12d3-a456-426614174000'
+DELETE FROM keywords WHERE id = '123e4567-e89b-12d3-a456-426614174000';
+
+-- PostgreSQL automatically executes (behind the scenes):
+DELETE FROM matched_certificates WHERE keyword_id = '123e4567-e89b-12d3-a456-426614174000';
+```
+
 #### Substring Matching Over Exact Match
 
 **Decision**: "amazon" matches "amazon.com", "amazongas.com", "secure-amazon.com".
@@ -390,6 +489,13 @@ Misses:  app-le.com (not a substring)
 - Subsequent starts resume from saved state
 
 **Consequence**: User won't see matches for keywords already issued before monitor started. This is expected for a monitoring tool (focus on forward-looking protection).
+
+**Read-Only CT Log Behavior**:
+- With the deprecated oak 2026h2 log (frozen since November 30, 2025), this optimization means:
+  - **First run**: Processes certificates from the current (frozen) tree position
+  - **Subsequent runs**: No new entries to process (tree size unchanged)
+  - This is why only the first run shows activity unless `MONITOR_REPROCESS_ON_IDLE=true` is enabled
+- Users should migrate to active CT logs for production monitoring of ongoing certificate issuance
 
 #### Color-Coded Keyword/Certificate Association
 
@@ -526,6 +632,9 @@ Misses:  app-le.com (not a substring)
 **Impact**:
 - Maximum ~1-2 minute latency from certificate issuance to detection (depends on batch timing)
 - Acceptable for PoC brand protection (real threats typically require hours/days to exploit)
+- **With deprecated oak 2026h2 log**: No new certificates are being added (log is read-only since November 30, 2025)
+  - Updates only occur on first run unless `MONITOR_REPROCESS_ON_IDLE=true` is enabled
+  - Users should migrate to active CT logs for production monitoring
 
 **Future Enhancement**: Streaming via CT log gossip protocol (Google Trillian) for sub-second latency.
 
@@ -574,20 +683,68 @@ All core functionality works as designed.
 
 ### Testing Coverage
 
-**Backend**:
-- Handler tests: All endpoints tested with mocks
-- Service tests: CT log client, matcher logic
-- No database required for tests (uses in-memory mocks)
-- Run: `go test ./...`
+The application has comprehensive test coverage across all layers:
 
-**Frontend**:
-- Component tests: Hooks, UI components
-- API client tests: Fetch mocking
-- Run: `npm run test:run`
+**Backend Testing (Go stdlib `testing` package)**:
 
-**Integration**:
-- Full Docker Compose stack tested manually
-- All user workflows verified
+- **Handler tests** with multiple validation scenarios:
+  - Success paths (200, 201, 204 status codes)
+  - Invalid input validation (400 Bad Request)
+  - Not found scenarios (404 responses)
+  - Database error handling (500 Internal Server Error)
+  - All endpoints tested with mock repositories
+
+- **Service tests**:
+  - CT log client: GetSTH, GetEntries, certificate parsing
+  - Matcher logic: Keyword matching against CN and SAN fields
+  - Monitor lifecycle: Start, stop, polling loop behavior
+
+- **Repository tests**:
+  - Interface-based mocks (no database required for unit tests)
+  - Keyword validation: Invalid IDs, not found scenarios, database errors
+  - Certificate storage: Deduplication, foreign key constraints
+
+- **Edge cases covered**:
+  - Invalid keyword IDs (malformed UUIDs)
+  - Missing keywords (404 responses)
+  - Concurrent keyword creation/deletion
+  - Certificate parsing failures (malformed X.509 data)
+  - CT log timeouts and network errors
+  - Monitor state transitions (inactive → active → inactive)
+
+- **Run tests**: `go test ./...` (fast — no external dependencies)
+
+**Frontend Testing (Vitest + Testing Library)**:
+
+- **Component tests**:
+  - Custom hooks: `useKeywords`, `useMonitor`, `useCertificates`
+  - UI components: User interaction, form validation, error states
+
+- **API client tests**:
+  - Fetch mocking for all endpoints
+  - Error response handling
+  - Pagination and filtering
+
+- **User interaction tests**:
+  - Keyword creation/deletion flows
+  - Monitor start/stop controls
+  - Certificate list refresh and filtering
+
+- **Validation tests**:
+  - Input validation (min/max length, character restrictions)
+  - Error message display
+  - Loading states
+
+- **Run tests**: `npm run test:run` (CI mode) or `npm run test` (watch mode)
+
+**Integration Testing**:
+
+- Full Docker Compose stack tested manually with end-to-end workflows:
+  - Database initialization and migrations
+  - Backend API startup and healthcheck
+  - Frontend proxy configuration (Nginx)
+  - All user workflows: Keyword CRUD, monitor lifecycle, certificate export
+  - Cross-browser compatibility verified (Chrome, Firefox, Safari, Edge)
 
 ### Performance Characteristics
 
