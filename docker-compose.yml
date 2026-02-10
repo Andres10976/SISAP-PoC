@@ -1,0 +1,51 @@
+services:
+  # ── PostgreSQL 17 ──────────────────────────────────────────
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ctmonitor
+      POSTGRES_PASSWORD: ctmonitor_dev
+      POSTGRES_DB: ct_monitor
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ctmonitor -d ct_monitor"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Go Backend ─────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://ctmonitor:ctmonitor_dev@db:5432/ct_monitor?sslmode=disable
+      CT_LOG_URL: https://oak.ct.letsencrypt.org/2026h2
+      SERVER_PORT: "8080"
+      MONITOR_INTERVAL: "60s"
+      MONITOR_BATCH_SIZE: "100"
+      CORS_ALLOW_ORIGIN: http://localhost:3000
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── React Frontend ─────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  pgdata:
