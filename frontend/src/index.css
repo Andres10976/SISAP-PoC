@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+/* Dark theme customization via @theme */
+@theme {
+  --color-gray-950: #0a0a0f;
+  --color-gray-900: #111118;
+  --color-gray-800: #1e1e2a;
+  --color-gray-700: #2e2e3e;
+  --font-family-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+}
+
+/* Global styles */
+body {
+  @apply bg-gray-950 text-gray-100 antialiased;
+}
+
+/* Scrollbar styling for dark theme */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: theme(--color-gray-700);
+  border-radius: 3px;
+}
