@@ -15,7 +15,7 @@ export function useCertificates({
   page,
   perPage,
   keywordId,
-  pollInterval = 10000,
+  pollInterval = 65000, // 65s - slightly after backend's 60s CT log poll
 }: UseCertificatesOptions) {
   const [certificates, setCertificates] = useState<MatchedCertificate[]>([]);
   const [total, setTotal] = useState(0);
